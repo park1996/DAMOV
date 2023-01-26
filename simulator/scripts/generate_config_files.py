@@ -110,6 +110,7 @@ with open(sys.argv[1], "r") as command_file:
         create_host_configs_no_prefetch(benchmark, application, function, command, "ooo")
         create_host_configs_prefetch(benchmark, application, function, command, "ooo")
         create_pim_configs(benchmark, application, function, command,"ooo")
+        create_pim_configs(benchmark, application, function, command,"ooo_netoh")
 
         create_host_configs_no_prefetch(benchmark, application, function, command, "accelerator")
         create_host_configs_prefetch(benchmark, application, function, command, "accelerator")

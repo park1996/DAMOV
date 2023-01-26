@@ -1,0 +1,11 @@
+*.depo
+*.dep
+*.deppo
+*.po
+*.log
+*.so
+*.o
+*.pc
+simulator/zsim_stats*/*
+*.out
+*.csv
