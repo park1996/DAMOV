@@ -91,6 +91,10 @@ public:
 
     void set_address_recorder (){
       get_memory_addresses = false;
+      string to_open = application_name + ".memory_addresses";
+      std::cout << "Recording memory trace at " << to_open << "\n";
+      memory_addresses.open(to_open.c_str(), std::ofstream::out);
+      memory_addresses << "CLK ADDR W|R Vault BankGroup Bank Row Column \n";
     }
 
     void set_application_name(string _app){
@@ -202,6 +206,16 @@ public:
         cout << "Request type = " << int(Request::Type::WRITE) << " is a write \n";
 
         num_cores = configs.get_core_num();
+        cout << "Number of cores in HMC Memory: " << configs.get_core_num() << endl;
+        address_distribution.resize(configs.get_core_num());
+        for(int i=0; i < configs.get_core_num(); i++){
+            //up to 32 vaults
+            address_distribution[i].resize(32);
+            for(int j=0; j < 32; j++){
+                address_distribution[i][j] = 0;
+            }
+        }
+
         this -> set_application_name(configs.get_application_name());
         if(configs.get_record_memory_trace()){
           this -> set_address_recorder();
@@ -582,6 +596,10 @@ public:
       }
       Packet packet(Packet::Type::REQUEST, cub, adrs, tag, lng, slid, cmd);
       packet.req = req;
+      
+      //cout << "Forming a packet to send to memory \n";
+      //cout << "ADDR: " << packet.header.ADRS.value << " CUB " << packet.header.CUB.value << " SLID " << packet.tail.SLID.value << " TAG " << packet.header.TAG.value << " LNG " << lng << endl;
+
       debug_hmc("cub: %d", cub);
       debug_hmc("adrs: %lx", adrs);
       debug_hmc("slid: %d", slid);
@@ -597,6 +615,7 @@ public:
     }
 
     void receive_packets(Packet packet) {
+      debug_hmc("receive response packets@host controller");
       if (packet.flow_control) {
         return;
       }
@@ -625,6 +644,7 @@ public:
 
     bool send(Request req)
     {
+      //  cout << "receive request packets@host controller with address " << req.addr << endl;
         req._addr = req.addr;
         req.addr_vec.resize(addr_bits.size());
         req.reqid = mem_req_count;
@@ -741,6 +761,44 @@ public:
             ++incoming_requests_per_channel[req.addr_vec[int(HMC::Level::Vault)]];
             ++mem_req_count;
 
+            if(req.coreid >= 0 && req.coreid < 256)
+              address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+            else
+              cerr << "HMC MEMORY: INVALID CORE ID: " << req.coreid << "endl";
+
+            if(get_memory_addresses){
+              if (profile_this_epoach){
+                memory_addresses << clk << " " << req.addr << " ";
+                if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
+                else if (req.type == Request::Type::READ)   memory_addresses << "R ";
+                else                                        memory_addresses << "NA ";
+                memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
+                                 << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+                                 << req.addr_vec[int(HMC::Level::Column)] << "\n";
+
+                instruction_counter++;
+                if(instruction_counter >= 10000){
+                  profile_this_epoach = false;
+                  instruction_counter = 0;
+                }
+              }
+              else{
+                instruction_counter++;
+                if(instruction_counter >= 990000){
+                  profile_this_epoach = true;
+                  instruction_counter = 0;
+                }
+              }
+            }
+
+            memory_addresses << clk << " " << req.addr << " ";
+            if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
+            else if (req.type == Request::Type::READ)   memory_addresses << "R ";
+            else                                        memory_addresses << "NA ";
+            memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
+                             << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+                             << req.addr_vec[int(HMC::Level::Column)] << "\n";
+
             return true;
         }
         else{
@@ -764,6 +822,10 @@ public:
               ++incoming_requests_per_channel[req.addr_vec[int(HMC::Level::Vault)]];
               ++mem_req_count;
 
+              if(req.coreid >= 0 && req.coreid < 256)
+                address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              else
+                cerr << "HMC MEMORY: INVALID CORE ID: " << req.coreid << "endl";
               return true;
             }
             else {
@@ -771,6 +833,40 @@ public:
             }
         }
 
+        if(get_memory_addresses){
+          cout << "Get memory address \n";
+          if (profile_this_epoach){
+
+            memory_addresses << clk << " " << req.addr << " ";
+            if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
+            else if (req.type == Request::Type::READ)   memory_addresses << "R ";
+            else                                        memory_addresses << "NA ";
+            memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
+                             << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+                             << req.addr_vec[int(HMC::Level::Column)] << "\n";
+
+            instruction_counter++;
+            if(instruction_counter >= 10000){
+              profile_this_epoach = false;
+              instruction_counter = 0;
+            }
+          }
+          else{
+            instruction_counter++;
+            if(instruction_counter >= 990000){
+              profile_this_epoach = true;
+              instruction_counter = 0;
+            }
+          }
+        }
+
+        memory_addresses << clk << " " << req.addr << " ";
+        if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
+        else if (req.type == Request::Type::READ)   memory_addresses << "R ";
+        else                                        memory_addresses << "NA ";
+        memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
+                         << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+                         << req.addr_vec[int(HMC::Level::Column)] << "\n";
         return true;
     }
 
@@ -810,6 +906,19 @@ public:
       req_queue_length_avg = req_queue_length_sum.value() / dram_cycles;
       read_req_queue_length_avg = read_req_queue_length_sum.value() / dram_cycles;
       write_req_queue_length_avg = write_req_queue_length_sum.value() / dram_cycles;
+
+      string to_open = application_name+".ramulator.address_distribution";
+      cout << "Address distribution stored at: " << to_open << endl;
+      cout << "Number of cores: " << num_cores << endl;
+      std::ofstream ofs(to_open.c_str(), std::ofstream::out);
+      ofs << "CoreID VaultID #Requests\n";
+      for(int i=0; i < address_distribution.size(); i++){
+        for(int j=0; j < 32; j++){
+          ofs << i << " " << j << " " <<  address_distribution[i][j] << "\n";
+        }
+      }
+      ofs.close();
+      memory_addresses.close();
     }
 
     long page_allocator(long addr, int coreid) {

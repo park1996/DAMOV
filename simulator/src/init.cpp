@@ -378,6 +378,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
         bool networkOverhead = config.get<bool>("sim.networkOverhead", false);
         bool record_memory_trace = config.get<bool>("sim.recordMemoryTrace", false);
         string application = config.get<const char*>("sim.stats");
+        cout << "Application name at init: " << application << "\n";
         mem = new Ramulator(ramulatorConfig, zinfo->numCores, lineSize, latency, domain, name, pimMode, application, frequency, record_memory_trace,networkOverhead);
         zinfo ->  ramulator_memory = true;
         zinfo -> ramulator = static_cast<Ramulator*>(mem);
@@ -398,6 +399,7 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
     CacheGroup& cg = *cgp;
 
     string prefix = "sys.caches." + name + ".";
+    std::cout << "prefix: " << prefix << std::endl;
 
 
     uint32_t size = config.get<uint32_t>(prefix + "size", 64*1024);

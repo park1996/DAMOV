@@ -64,6 +64,8 @@ def create_host_configs_prefetch(benchmark, application, function, command, vers
 
 def create_pim_configs(benchmark, application, function, command, version):
     number_of_cores = [1, 4, 16, 64, 256]
+    if "memtrace" in version:
+        number_of_cores.append(32)
 
     for cores in number_of_cores:
         mkdir_p(ROOT+"config_files/pim_"+version+"/"+benchmark+"/"+str(cores)+"/")
@@ -111,6 +113,7 @@ with open(sys.argv[1], "r") as command_file:
         create_host_configs_prefetch(benchmark, application, function, command, "ooo")
         create_pim_configs(benchmark, application, function, command,"ooo")
         create_pim_configs(benchmark, application, function, command,"ooo_netoh")
+        create_pim_configs(benchmark, application, function, command,"ooo_memtrace")
 
         create_host_configs_no_prefetch(benchmark, application, function, command, "accelerator")
         create_host_configs_prefetch(benchmark, application, function, command, "accelerator")
