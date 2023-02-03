@@ -9,3 +9,8 @@
 simulator/zsim_stats*/*
 *.out
 *.csv
+simulator/build/*
+simulator/config_files/*
+workloads/*
+simulator/.sconsign.dblite
+simulator/libconfig/
