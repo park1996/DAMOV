@@ -8,10 +8,6 @@
 #include <list>
 #include <string>
 #include <vector>
-<<<<<<< HEAD
-=======
-
->>>>>>> Start the implementation of prefetcher
 #include <unordered_map>
 #include "Controller.h"
 #include "Scheduler.h"
