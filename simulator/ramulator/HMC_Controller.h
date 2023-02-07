@@ -8,6 +8,10 @@
 #include <list>
 #include <string>
 #include <vector>
+<<<<<<< HEAD
+=======
+
+>>>>>>> Start the implementation of prefetcher
 #include <unordered_map>
 #include "Controller.h"
 #include "Scheduler.h"
@@ -623,6 +627,7 @@ public:
     bool receive (Packet& packet) {
       assert(packet.type == Packet::Type::REQUEST);
       Request& req = packet.req;
+      prefetcher.update_counter_table(req);
 
       if(!pim_mode_enabled)
         req.burst_count = channel->spec->burst_count;
@@ -639,6 +644,7 @@ public:
     }
 
     bool receive (Request& req) {
+      prefetcher.update_counter_table(req);
       req.burst_count = 2; //TSV = 32 bytes, request = 64 bytes -> 2 bursts
 
       req.transaction_bytes = channel->spec->payload_flits * 16;
