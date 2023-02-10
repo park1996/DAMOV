@@ -64,7 +64,7 @@ def create_host_configs_prefetch(benchmark, application, function, command, vers
 
 def create_pim_configs(benchmark, application, function, command, version):
     number_of_cores = [1, 4, 16, 64, 256]
-    if "memtrace" in version:
+    if "ooo" in version:
         number_of_cores.append(32)
 
     for cores in number_of_cores:
