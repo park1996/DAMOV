@@ -198,8 +198,48 @@ public:
     Queue otherq;  // queue for all "other" requests (e.g., refresh)
     Queue overflow;
 
-    deque<Request> pending;  // read requests that are about to receive data from DRAM
-    deque<Request> pending_write;  //write requests that are about to receive data from DRAM
+    struct PendingQueue {
+        deque<Request> q;
+        deque<Request> arrivel_q;
+        unsigned int size() {return q.size();}
+        void update(){
+          for (auto& i : arrivel_q) {
+            if(i.hops == 0){
+              q.push_back(i);
+            }
+            i.hops -= 1;
+            if(i.hops == 0){
+              q.push_back(i);
+            }
+          }
+
+          deque<Request> tmp;
+          for(auto& i : arrivel_q){
+            if(i.hops > 0){
+              tmp.push_back(i);
+            }
+          }
+          arrivel_q = tmp;
+        }
+        void arrive(Request& req) {
+            if(req.hops == 0) {
+                q.push_back(req);
+            } else {
+                arrivel_q.push_back(req);
+            }
+        }
+        void push_back(Request& req){
+            if(req.hops == 0) {
+                q.push_back(req);
+            } else {
+                arrivel_q.push_back(req);
+            }
+        }
+        void pop_front(){q.pop_front();}
+    };
+
+    PendingQueue pending;  // read requests that are about to receive data from DRAM
+    PendingQueue pending_write;  //write requests that are about to receive data from DRAM
 
     bool write_mode = false;  // whether write requests should be prioritized over reads
     //long refreshed = 0;  // last time refresh requests were generated
@@ -697,7 +737,7 @@ public:
         otherq.update();
         /*** 1. Serve completed reads ***/
         if (pending.size()) {
-          Request& req = pending[0];
+          Request& req = pending.q[0];
           if (req.depart <= clk) {
             if (req.depart - req.arrive > 1) {
               channel->update_serving_requests(req.addr_vec.data(), -1, clk);
