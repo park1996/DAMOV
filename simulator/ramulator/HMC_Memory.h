@@ -8,6 +8,8 @@
 #include "Packet.h"
 #include "Statistics.h"
 #include <fstream>
+#include <vector>
+#include <array>
 
 using namespace std;
 
@@ -134,6 +136,163 @@ public:
     vector<LogicLayer<HMC>*> logic_layers;
     HMC * spec;
 
+    // A subscription based prefetcher
+    template <typename TableType>
+    class SubscriptionPrefetcherSet {
+    private:
+        static const int COUNTER_TABLE_SIZE = 1024;
+        static const int COUNTER_BITS = 16;
+        static const int TAG_BITS = 16;
+        vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
+        unordered_map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
+        unordered_map<long, long> address_swap_table; // Subscribe remote address (1st val) to local address (2nd address)
+    public:
+        SubscriptionPrefetcherSet(int controllers):count_tables(controllers, array<TableType, COUNTER_TABLE_SIZE>()) {}
+        int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
+        bool check_prefetch(TableType hops, TableType count) {
+            // TODO: Implment a good prefetch policy
+            return hops >= 5 && count >= 1;
+        }
+        void unsubscribe_address(long address) {
+            if(address_translation_table.count(address) == 0) {
+                return;
+            }
+            // TODO: Swap the "victim address" back
+            address_translation_table.erase(address);
+        }
+        int subscribe_address(long address, int vault) {
+            // TODO: Determine a "victim address to be swapped over"
+            unsubscribe_address(address); // Unscribe first to make sure we're not having any issues
+            address_translation_table[address] = vault;
+            return vault;
+        }
+        int find_vault(long address, int original_vault) {
+            if(address_translation_table.count(address)) {
+                return address_translation_table[address];
+            }
+            return original_vault;
+        }
+        void update_counter_table(Request req) {
+            long addr = req.addr;
+            int val_vault_id = find_vault(addr, req.addr_vec[int(HMC::Level::Vault)]);
+            int req_vault_id = req.coreid;
+            long table_index = addr / 64 % COUNTER_TABLE_SIZE; // 64 bits per flip, and we prefetch by flip
+            TableType table_entry = count_tables[req_vault_id][table_index]; // Requesting core is in charge of keeping track
+            TableType tag = 0;
+            long temp_addr = addr;
+            while (temp_addr != 0) {
+                tag ^= temp_addr;
+                temp_addr = temp_addr >> TAG_BITS;
+            }
+            tag = (tag << (COUNTER_BITS)) >> (COUNTER_BITS);
+            TableType count;
+            TableType old_tag = (table_entry >> (COUNTER_BITS));
+            if(old_tag != tag) {
+                count = 0; // If tag does not match, the address is not the same and we start from the scratch
+                // cout << "A prefetch table replacement happening at index: " << table_index << " and vault " << req.addr_vec[int(HMC::Level::Vault)] <<
+                //     " The old tag is " << old_tag << " the new tag is " << tag << endl;
+            } else {
+                // cout << "No replacement is happening as the old tag is the same as the new tag! Index: " << table_index << " vault: " << req.addr_vec[int(HMC::Level::Vault)] << " old tag: " <<
+                //     old_tag << " new tag: " << tag << endl;   
+                TableType count = (table_entry << TAG_BITS >>  TAG_BITS);
+            }
+            count++;
+            if(count >= (1 << COUNTER_BITS)) {
+                count = (1 << COUNTER_BITS) - 1;
+            }
+            int vault_destination_x = val_vault_id/6;
+            int vault_destination_y = val_vault_id%6;
+            int vault_origin_x = req_vault_id/6;
+            int vault_origin_y = req_vault_id%6;
+            TableType hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
+            count_tables[req_vault_id][table_index] = (tag << (COUNTER_BITS)) | count;
+            if(check_prefetch(hops, count)) {
+                // cout << "[RAMULATOR] Subscribing memory from vault " << req.addr_vec[int(HMC::Level::Vault)] << " to core " << req.coreid << ". Inserted in index " << table_index << endl;
+                subscribe_address(addr, req_vault_id);
+            }
+        }
+    };
+
+    SubscriptionPrefetcherSet<uint32_t> prefetcher_set;
+
+    // class SubscriptionPrefetcherSet::SubscriptionPrefetcher {
+    // private:
+    //     static const int COUNTER_TABLE_SIZE = 1024;
+    //     static const int COUNTER_BITS = 16;
+    //     static const int HOP_BITS = 4;
+    //     static const int TAG_BITS = 12;
+    //     TableType counter_table[COUNTER_TABLE_SIZE];
+    //     unordered_map<long, int> subscription_table; // Subscribe remote address (1st val) to local address (2nd address)
+    // public:
+    //     int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
+    //     bool check_prefetch(TableType hops, TableType count) {
+    //         // TODO: Implment a good prefetch policy
+    //         return hops >= 5 && count >= 1;
+    //     }
+    //     long subscribe_address(long remote_address) {
+    //         // TODO: Request the remote address to be sent over. If unsucessful, return 0
+    //         // TODO: Check if we have a local address to hold the subscribed data. If unsuccessful, return 0
+    //         long allocated_address = 0;
+    //         subscription_table[remote_address] = allocated_address;
+    //         return allocated_address;
+    //     }
+    //     // TODO: Call remote controller's unsubscription function when writing new data to subscribed flips
+    //     void unsubscribe_address(long remote_address) {
+    //         // TODO: Free the local address of the subscribed data.
+    //         subscription_table.erase(remote_address);
+    //     }
+    //     long translate_address(long remote_address) {
+    //         if(subscription_table.count(remote_address)) {
+    //             return subscription_table[remote_address];
+    //         }
+    //         return remote_address;
+    //     }
+    //     void update_counter_table(Request req) {
+    //         long addr = req.addr;
+    //         if(subscription_table.count(addr)) {
+    //             // cout << "[RAMULATOR] Address " << addr << " is already subscribed." << endl;
+    //             return; // Do nothing if the address is already subscribed.
+    //         }
+    //         long table_index = addr / 64 % COUNTER_TABLE_SIZE; // 64 bits per flip, and we prefetch by flip
+    //         TableType table_entry = counter_table[table_index];
+    //         TableType tag = 0;
+    //         long temp_addr = addr;
+    //         while (temp_addr != 0) {
+    //             tag ^= temp_addr;
+    //             temp_addr = temp_addr >> TAG_BITS;
+    //         }
+    //         tag = (tag << (COUNTER_BITS + HOP_BITS)) >> (COUNTER_BITS + HOP_BITS);
+    //         TableType count;
+    //         TableType old_tag = (table_entry >> (COUNTER_BITS + HOP_BITS));
+    //         if(old_tag != tag) {
+    //             count = 0; // If tag does not match, the address is not the same and we start from the scratch
+    //             // cout << "A prefetch table replacement happening at index: " << table_index << " and vault " << req.addr_vec[int(HMC::Level::Vault)] <<
+    //             //     " The old tag is " << old_tag << " the new tag is " << tag << endl;
+    //         } else {
+    //             // cout << "No replacement is happening as the old tag is the same as the new tag! Index: " << table_index << " vault: " << req.addr_vec[int(HMC::Level::Vault)] << " old tag: " <<
+    //             //     old_tag << " new tag: " << tag << endl;   
+    //             TableType count = (table_entry << (HOP_BITS + TAG_BITS) >> (HOP_BITS + TAG_BITS));
+    //         }
+    //         count++;
+    //         if(count >= (1 << COUNTER_BITS)) {
+    //             count = (1 << COUNTER_BITS) - 1;
+    //         }
+    //         int vault_destination_x = req.addr_vec[int(HMC::Level::Vault)]/6;
+    //         int vault_destination_y = req.addr_vec[int(HMC::Level::Vault)]%6;
+    //         int vault_origin_x = req.coreid/6;
+    //         int vault_origin_y = req.coreid%6;
+    //         TableType hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
+    //         if(hops >= (1 << HOP_BITS)) {
+    //             hops = (1 << HOP_BITS) - 1;
+    //         }
+    //         counter_table[table_index] = (tag << (COUNTER_BITS + HOP_BITS)) | (hops << COUNTER_BITS) | count;
+    //         if(check_prefetch(hops, count)) {
+    //             // cout << "[RAMULATOR] Subscribing memory from vault " << req.addr_vec[int(HMC::Level::Vault)] << " to core " << req.coreid << ". Inserted in index " << table_index << endl;
+    //             subscribe_address(addr);
+    //         }
+    //     }
+    // };
+
     vector<int> addr_bits;
     vector<vector <int> > address_distribution;
 
@@ -142,7 +301,8 @@ public:
     Memory(const Config& configs, vector<Controller<HMC>*> ctrls)
         : ctrls(ctrls),
           spec(ctrls[0]->channel->spec),
-          addr_bits(int(HMC::Level::MAX))
+          addr_bits(int(HMC::Level::MAX)),
+          prefetcher_set(ctrls.size())
     {
         // make sure 2^N channels/ranks
         // TODO support channel number that is not powers of 2
@@ -728,8 +888,8 @@ public:
             // To model NOC traffic
             //I'm considering 32 vaults. So the 2D mesh will be 36x36
             //To calculate how many hops, check the manhattan distance
-            int vault_destination_x = req.addr_vec[int(HMC::Level::Vault)]/6;
-            int vault_destination_y = req.addr_vec[int(HMC::Level::Vault)]%6;
+            int vault_destination_x = prefetcher_set.find_vault(req.addr, req.addr_vec[int(HMC::Level::Vault)])/6;
+            int vault_destination_y = prefetcher_set.find_vault(req.addr, req.addr_vec[int(HMC::Level::Vault)])%6;
 
             int vault_origin_x = req.coreid/6;
             int vault_origin_y = req.coreid%6;
@@ -750,6 +910,7 @@ public:
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
               return false;
             }
+            prefetcher_set.update_counter_table(req);
 
             if (req.type == Request::Type::READ) {
                 ++num_read_requests[coreid];
