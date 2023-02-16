@@ -170,7 +170,6 @@ public:
     private:
       static const int COUNTER_TABLE_SIZE = 1024;
       static const int COUNTER_BITS = 16;
-      static const int TAG_BITS = 16;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
@@ -318,10 +317,6 @@ public:
           subscribe_address(req.addr_vec, req_vault_id, val_vault_id);
         }
       }
-    };
-
-    SubscriptionPrefetcherSet<uint32_t> prefetcher_set;
-
     vector<int> addr_bits;
     vector<vector <int> > address_distribution;
 
