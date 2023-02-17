@@ -11,11 +11,18 @@ experiment_status = []
 #     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
 #     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
 #     "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
-benchmark_suites_and_benchmarks_functions = {"stream" : ["Scale_Scale", "Triad_Triad"]}
+benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
+    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "ligra" : ["PageRank_edgeMapDenseUSA"],
+    "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"],
+    "rodinia" : ["BFS_BFS"],
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
 
 # processor_types = ["host_ooo/prefetch", "host_ooo/no_prefetch", "pim_ooo"]
 processor_types = ["pim_ooo_netoh"]
-core_numbers = ["1", "4", "16", "64", "256"]
+# core_numbers = ["1", "4", "16", "64", "256"]
+core_numbers = ["32"]
 
 for suite in benchmark_suites_and_benchmarks_functions.keys():
     for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
