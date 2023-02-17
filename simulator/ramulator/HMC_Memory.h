@@ -153,6 +153,18 @@ public:
     vector<LogicLayer<HMC>*> logic_layers;
     HMC * spec;
 
+    enum SubscriptionPrefetcherType {
+      None, // Baseline configuration (no prefetching)
+      Swap, // Swap with remote vault's same address
+      Allocate, // Allocate from local vault's reserved address. To be implemented
+      Copy // Copy to local vault's reserved address. To be implemented
+    } subscription_prefetcher_type = SubscriptionPrefetcherType::None;
+
+    std::map<string, SubscriptionPrefetcherType> name_to_prefetcher_type = {
+      {"None", SubscriptionPrefetcherType::None},
+      {"Swap", SubscriptionPrefetcherType::Swap},
+    };
+
     // A subscription based prefetcher
     template <typename TableType>
     class SubscriptionPrefetcherSet {
@@ -385,6 +397,11 @@ public:
         this -> set_application_name(configs.get_application_name());
         if(configs.get_record_memory_trace()){
           this -> set_address_recorder();
+        }
+
+        if (configs.contains("subscription_prefetcher")) {
+          cout << "Using prefetcher: " << configs["subscription_prefetcher"] << endl;
+          subscription_prefetcher_type = name_to_prefetcher_type[configs["subscription_prefetcher"]];
         }
 
         // regStats
@@ -725,7 +742,9 @@ public:
         for (auto logic_layer : logic_layers) {
           logic_layer->tick();
         }
-        prefetcher_set.tick();
+        if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+          prefetcher_set.tick();
+        }
     }
 
     int assign_tag(int slid) {
@@ -888,8 +907,11 @@ public:
           default:
               assert(false);
         }
-        req.addr_vec[int(HMC::Level::Vault)] = 
+        if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+          req.addr_vec[int(HMC::Level::Vault)] = 
             prefetcher_set.find_vault(req.addr_vec, req.addr_vec[int(HMC::Level::Vault)]);
+        }
+
 
         req.arrive_hmc = clk;
 
@@ -920,7 +942,9 @@ public:
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
               return false;
             }
-            prefetcher_set.update_counter_table(req);
+            if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+              prefetcher_set.update_counter_table(req);
+            }
 
             if (req.type == Request::Type::READ) {
                 ++num_read_requests[coreid];
