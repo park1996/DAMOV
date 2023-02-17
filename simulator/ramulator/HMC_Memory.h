@@ -10,6 +10,11 @@
 #include <fstream>
 #include <vector>
 #include <array>
+#define NETWORK_WIDTH 6
+#define NETWORK_HEIGHT 6
+#define WRITE_LENGTH 5
+#define READ_LENGTH 6
+#define OTHER_LENGTH 1
 
 using namespace std;
 
