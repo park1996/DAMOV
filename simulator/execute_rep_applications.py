@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 import csv
 
+<<<<<<< HEAD
 def mkdir_p(directory):
     try:
         os.makedirs(directory)
@@ -29,6 +30,13 @@ with open(summary_file, "a") as status_summary:
     csv_writer.writerow(summary_file_header)
 
 
+=======
+maximum_thread = 20
+running_num_threads = 0
+thread_statuses = dict()
+threads = []
+experiment_status = []
+>>>>>>> Update helper scripts
 def run_benchmark(processor_type, benchmark_suite, core_number, function):
     config_file = os.path.join("config_files", processor_type, benchmark_suite, core_number, function+".cfg")
     stdout_file = os.path.join(output_dir, processor_type+"_"+core_number+"_"+benchmark_suite+"_"+function+".txt")
@@ -58,7 +66,11 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
 
 # processor_types = ["host_ooo/prefetch", "host_ooo/no_prefetch", "pim_ooo"]
+<<<<<<< HEAD
 processor_types = ["pim_ooo", "pim_ooo_netoh", "pim_ooo_netoh_withswapsubpf"]
+=======
+processor_types = ["pim_ooo_netoh_withswapsubpf"]
+>>>>>>> Update helper scripts
 # core_numbers = ["1", "4", "16", "64", "256"]
 core_numbers = ["32"]
 
@@ -70,7 +82,21 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
                 current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
                 threads.append(current_thread)
                 current_thread.start()
+<<<<<<< HEAD
                 if threading.active_count() >= maximum_thread + 1:
                     print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
                     while threading.active_count() >= maximum_thread + 1:
                         time.sleep(1)
+=======
+                running_num_threads += 1
+                if running_num_threads >= maximum_thread:
+                    print "Reaching maximum allowed concurrent threads. Waiting for threads to finish..."
+                    for thread in threads:
+                        thread.join()
+                    thread = []
+                    running_num_threads = 0
+
+with open("execution_statuses.txt", "w") as status_file:
+    for experiment in thread_statuses.keys():
+        status_file.write("Experiment " + experiment + " is completed with status " + thread_statuses[experiment])
+>>>>>>> Update helper scripts
