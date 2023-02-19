@@ -20,7 +20,7 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
 
 # processor_types = ["host_ooo/prefetch", "host_ooo/no_prefetch", "pim_ooo"]
-processor_types = ["pim_ooo_netoh"]
+processor_types = ["pim_ooo"]
 # core_numbers = ["1", "4", "16", "64", "256"]
 core_numbers = ["32"]
 
