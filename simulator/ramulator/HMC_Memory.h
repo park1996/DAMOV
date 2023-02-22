@@ -10,11 +10,6 @@
 #include <fstream>
 #include <vector>
 #include <array>
-#define NETWORK_WIDTH 6
-#define NETWORK_HEIGHT 6
-#define WRITE_LENGTH 5
-#define READ_LENGTH 6
-#define OTHER_LENGTH 1
 
 using namespace std;
 
@@ -108,6 +103,7 @@ public:
 
       int hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
       hops = hops*length;
+      assert(hops <= MAX_HOP);
       return hops;
     }
 
@@ -175,6 +171,8 @@ public:
       static const int COUNTER_TABLE_SIZE = 1024;
       static const int COUNTER_BITS = 16;
       static const int TAG_BITS = 16;
+      TableType prefetch_hops_threshold = 5;
+      TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
       map<vector<int>, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
       struct SubscriptionTask {
@@ -192,9 +190,15 @@ public:
         count_tables.assign(controllers, zero_array);
       }
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
+      void set_prefetch_hops_threshold(int threshold) {
+        prefetch_hops_threshold = threshold;
+      }
+      void set_prefetch_count_threshold(int threshold) {
+        prefetch_count_threshold = threshold;
+      }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
-        return hops >= 5 && count >= 1;
+        return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
       }
       void immediate_unsubscribe_address(const vector<int>& addr_vec) {
         address_translation_table.erase(addr_vec);
@@ -247,11 +251,11 @@ public:
           } // Safety Check
 
           i.hops -= 1;
-          if(i.hops == 0){
-            immediate_subscribe_address(i.addr_vec, i.req_vault);
-          } else if(i.hops > 0) {
+          // if(i.hops == 0){
+          //   immediate_subscribe_address(i.addr_vec, i.req_vault);
+          // } else if(i.hops > 0) {
             new_pending_subscription.push_back(i);
-          }
+          // }
         }
         pending_subscription = new_pending_subscription;
 
@@ -263,11 +267,11 @@ public:
           } // Safety Check
 
           i.hops -= 1;
-          if(i.hops == 0){
-            immediate_unsubscribe_address(i.addr_vec);
-          } else if (i.hops > 0) {
+          // if(i.hops == 0){
+          //   immediate_unsubscribe_address(i.addr_vec);
+          // } else if (i.hops > 0) {
             new_pending_unsubscription.push_back(i);
-          }
+          // }
         }
         pending_unsubscription = new_pending_unsubscription;
       }
@@ -409,6 +413,14 @@ public:
         if (configs.contains("subscription_prefetcher")) {
           cout << "Using prefetcher: " << configs["subscription_prefetcher"] << endl;
           subscription_prefetcher_type = name_to_prefetcher_type[configs["subscription_prefetcher"]];
+        }
+
+        if (configs.contains("prefetcher_count_threshold")) {
+          prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_count_threshold"]));
+        }
+
+        if (configs.contains("prefetcher_hops_threshold")) {
+          prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
         // regStats
