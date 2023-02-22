@@ -11,6 +11,16 @@ simulator/zsim_stats*/*
 *.csv
 simulator/build/*
 simulator/config_files/*
+simulator/config_files*
 workloads/*
 simulator/.sconsign.dblite
 simulator/libconfig/
+simulator/libconfig/*
+simulator/libconfig/*/*
+simulator/ramulator-configs/prefetcher/*
+simulator/ramulator-configs/prefetcher/
+.vscode
+.vscode/*
+simulator/execution_statuses.txt
+simulator-communication-info-patch/
+simulator-communication-info-patch/*
