@@ -14,7 +14,34 @@ def mkdir_p(directory):
         else:
             raise
 
-maximum_thread = 10
+
+hops_thresholds = []
+count_thresholds = []
+hops_threshold_start = 1
+hops_threshold_stepping = 1
+hops_threshold_maximum = 10
+count_threshold_start = 1
+count_threshold_stepping = 4
+count_threshold_maximum = 65535
+
+def next_hops(current_hops):
+    return current_hops + hops_threshold_stepping
+
+def next_count(current_count):
+    return (current_count+1)*count_threshold_stepping-1
+
+hops = hops_threshold_start
+while hops <= hops_threshold_maximum:
+    hops_thresholds.append(hops)
+    hops = next_hops(hops)
+
+count = count_threshold_start
+while count <= count_threshold_maximum:
+    count_thresholds.append(count)
+    count = next_count(count)
+
+maximum_thread = 32
+running_num_threads = 0
 threads = []
 output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -50,17 +77,20 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function):
 #     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
 #     "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
-    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hashjoin" : ["NPO_probehashtable"],
     "ligra" : ["PageRank_edgeMapDenseUSA"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"],
-    "rodinia" : ["BFS_BFS"],
-    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gemver", "stencil_convolution-2d"], 
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
-# processor_types = ["host_ooo/prefetch", "host_ooo/no_prefetch", "pim_ooo"]
-processor_types = ["pim_ooo", "pim_ooo_netoh", "pim_ooo_netoh_withswapsubpf"]
-# core_numbers = ["1", "4", "16", "64", "256"]
+processor_types = []
 core_numbers = ["32"]
+processor_type_prefix = "pim_prefetch_netoh_"
+prefetcher_types = ["swap"]
+for prefetcher_type in prefetcher_types:
+    for hops_threshold in hops_thresholds:
+        for count_threshold in count_thresholds:
+            processor_types.append(processor_type_prefix+prefetcher_type+str(hops_threshold)+"h"+str(count_threshold)+"c")
 
 for suite in benchmark_suites_and_benchmarks_functions.keys():
     for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
