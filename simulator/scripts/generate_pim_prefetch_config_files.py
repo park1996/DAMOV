@@ -5,11 +5,11 @@ import errno
 
 hops_thresholds = []
 count_thresholds = []
-hops_threshold_start = 2
-hops_threshold_stepping = 4
+hops_threshold_start = 1
+hops_threshold_stepping = 1
 hops_threshold_maximum = 10
 count_threshold_start = 1
-count_threshold_stepping = 8
+count_threshold_stepping = 4
 count_threshold_maximum = 65535
 
 def next_hops(current_hops):

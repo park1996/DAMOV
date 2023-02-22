@@ -1,6 +1,7 @@
 import os
 import csv
 import sys
+from datetime import datetime
 
 benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
     "darknet" : ["resnet152_gemm_nn", "yolo_gemm_nn"],
@@ -14,7 +15,7 @@ processor_types = ["pim_ooo_netoh", "pim_ooo_netoh_withswapsubpf", "pim_ooo"]
 core_number = "32"
 csv_header = ["Benchmark", "pim_ooo_netoh", "pim_ooo_netoh_withswapsubpf", "pim_ooo", "Improvement"]
 
-output_filename = "stats_cycle_pim_netoh_and_pf.csv"
+output_filename = "stats_cycle_pim_netoh_and_pf_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")+".csv"
 output_filename = os.path.join(os.getcwd(), output_filename)
 stats_folders = os.path.join(os.getcwd(), "zsim_stats")
 
@@ -49,6 +50,6 @@ with open(output_filename, mode='w') as csv_file:
     csv_writer.writerow(["pim_ooo_netoh_withswapsubpf refers to the model with a prefetcher that swaps the local vault page with remote vault's page at the same location"])
     csv_writer.writerow(["pim_ooo refers to the ideal model of no network connection overhead. Every memory access completes instantly"])
     csv_writer.writerow(["The numbers are the number of cycles taken for each benchmark to run (the lower the better)"])
-    csv_writer.writerow(["The improvement refers to the cycle taken by pim_ooo_netoh divided by pim_ooo_netoh_withswapsubpf and minus one (the higher the better, negative value means worse performance with prefetcher)"])
+    csv_writer.writerow(["The improvement refers to the cycle taken by pim_ooo_netoh divided by pim_ooo_netoh_withswapsubpf and minus one (the higher the better and negative value means worse performance with prefetcher)"])
 
 
