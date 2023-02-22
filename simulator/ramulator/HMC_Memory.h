@@ -415,7 +415,6 @@ public:
           subscription_prefetcher_type = name_to_prefetcher_type[configs["subscription_prefetcher"]];
         }
 
-<<<<<<< HEAD
         if (configs.contains("prefetcher_count_threshold")) {
           prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_count_threshold"]));
         }
@@ -424,8 +423,6 @@ public:
           prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
-=======
->>>>>>> ecfce9a11bdb0e800a70abb80db755eeecde1eb7
         // regStats
         dram_capacity
             .name("dram_capacity")
