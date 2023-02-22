@@ -172,18 +172,15 @@ public:
         unsigned int max = 32; // TODO queue qize
         unsigned int size() {return q.size();}
         void update(){
-          for (auto& i : arrivel_q) {
-            i.hops -= 1;
-            if(i.hops <= 0){
-              q.push_back(i);
-            }
-          }
-
           list<Request> tmp;
-          for(auto& i : arrivel_q){
-            if(i.hops > 0){
-              tmp.push_back(i);
+          for (auto& i : arrivel_q) {
+            assert(i.hops <= MAX_HOP);
+            if(i.hops == 0){
+              q.push_back(i);
+              continue;
             }
+            i.hops -= 1;
+            tmp.push_back(i);
           }
           arrivel_q = tmp;
         }
