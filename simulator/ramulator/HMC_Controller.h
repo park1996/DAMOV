@@ -731,7 +731,7 @@ public:
         otherq.update();
         /*** 1. Serve completed reads ***/
         if (pending.size()) {
-          Request& req = pending.q[0];
+          Request& req = pending[0];
           if (req.depart <= clk) {
             if (req.depart - req.arrive > 1) {
               channel->update_serving_requests(req.addr_vec.data(), -1, clk);
