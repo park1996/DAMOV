@@ -174,7 +174,8 @@ public:
     class SubscriptionPrefetcherSet {
     private:
       static const int COUNTER_TABLE_SIZE = 1024;
-      static const int COUNTER_BITS = 16;
+      static const int COUNTER_BITS = 8;
+      static const int TAG_BITS = 24;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
@@ -309,8 +310,8 @@ public:
           // cout << "No replacement is happening as the old tag is the same as the new tag! Index: " << table_index << " vault: " << req.addr_vec[int(HMC::Level::Vault)] << " old tag: " <<
           //     old_tag << " new tag: " << tag << endl;   
           count = (table_entry << TAG_BITS >>  TAG_BITS);
+          count++;
         }
-        count++;
         if(count >= ((TableType)1 << COUNTER_BITS)) {
           count = ((TableType)1 << COUNTER_BITS) - 1;
         }
