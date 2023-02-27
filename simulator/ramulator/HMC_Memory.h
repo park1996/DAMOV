@@ -256,11 +256,7 @@ public:
           } // Safety Check
 
           i.hops -= 1;
-          // if(i.hops == 0){
-          //   immediate_subscribe_address(i.addr_vec, i.req_vault);
-          // } else if(i.hops > 0) {
-            new_pending_subscription.push_back(i);
-          // }
+          new_pending_subscription.push_back(i);
         }
         pending_subscription = new_pending_subscription;
 
@@ -272,11 +268,7 @@ public:
           } // Safety Check
 
           i.hops -= 1;
-          // if(i.hops == 0){
-          //   immediate_unsubscribe_address(i.addr_vec);
-          // } else if (i.hops > 0) {
-            new_pending_unsubscription.push_back(i);
-          // }
+          new_pending_unsubscription.push_back(i);
         }
         pending_unsubscription = new_pending_unsubscription;
       }
@@ -421,7 +413,7 @@ public:
         }
 
         if (configs.contains("prefetcher_hops_threshold")) {
-          prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_hops_threshold"]));
+          prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
         // regStats
