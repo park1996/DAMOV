@@ -273,7 +273,7 @@ public:
           return address_translation_table[addr_vec];
         }
         return original_vault;
-    }
+      }
       void update_counter_table(const Request& req) {
         long addr = req.addr;
         int req_vault_id = req.coreid;
@@ -310,6 +310,7 @@ public:
           subscribe_address(req.addr_vec, req_vault_id, val_vault_id);
         }
       }
+    };
     vector<int> addr_bits;
     vector<vector <int> > address_distribution;
 
