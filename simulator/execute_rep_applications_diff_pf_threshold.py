@@ -4,6 +4,7 @@ import subprocess
 import time
 from datetime import datetime
 import csv
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
 
 def mkdir_p(directory):
     try:
@@ -15,33 +16,10 @@ def mkdir_p(directory):
             raise
 
 
-hops_thresholds = []
-count_thresholds = []
-hops_threshold_start = 1
-hops_threshold_stepping = 1
-hops_threshold_maximum = 10
-count_threshold_start = 1
-count_threshold_stepping = 4
-count_threshold_maximum = 65535
+hops_thresholds = get_hops_thresholds()
+count_thresholds = get_count_thresholds()
 
-def next_hops(current_hops):
-    return current_hops + hops_threshold_stepping
-
-def next_count(current_count):
-    return (current_count+1)*count_threshold_stepping-1
-
-hops = hops_threshold_start
-while hops <= hops_threshold_maximum:
-    hops_thresholds.append(hops)
-    hops = next_hops(hops)
-
-count = count_threshold_start
-while count <= count_threshold_maximum:
-    count_thresholds.append(count)
-    count = next_count(count)
-
-maximum_thread = 32
-running_num_threads = 0
+maximum_thread = 80
 threads = []
 output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -80,8 +58,12 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
     "hashjoin" : ["NPO_probehashtable"],
     "ligra" : ["PageRank_edgeMapDenseUSA"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gemver", "stencil_convolution-2d"], 
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+# benchmark_suites_and_benchmarks_functions = {"hashjoin" : ["NPO_probehashtable"],
+#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gemver"], 
+#     "stream" : ["Triad_Triad"]}
 
 processor_types = []
 core_numbers = ["32"]
@@ -92,11 +74,20 @@ for prefetcher_type in prefetcher_types:
         for count_threshold in count_thresholds:
             processor_types.append(processor_type_prefix+prefetcher_type+str(hops_threshold)+"h"+str(count_threshold)+"c")
 
+total_experiment_count = 0
+for suite in benchmark_suites_and_benchmarks_functions.keys():
+    total_experiment_count += len(benchmark_suites_and_benchmarks_functions[suite])
+total_experiment_count *= len(processor_types)
+total_experiment_count *= len(core_numbers)
+print "Starting experiments. There are " + str(total_experiment_count) + " experiments to be scheduled, for cores: " + str(core_numbers) + " and processor types: " + str(processor_types)
+scheduled_experiments = 0
+
 for suite in benchmark_suites_and_benchmarks_functions.keys():
     for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
         for processor_type in processor_types:
             for core_number in core_numbers:
-                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type + " and " + core_number + " core(s)"
+                scheduled_experiments += 1
+                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
                 current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
                 threads.append(current_thread)
                 current_thread.start()
@@ -104,3 +95,6 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
                     print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
                     while threading.active_count() >= maximum_thread + 1:
                         time.sleep(1)
+print "The main thread has started all threads. Now waiting for threads to finish..."
+for thread in threads:
+    thread.join()

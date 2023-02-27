@@ -2,31 +2,10 @@
 import sys
 import os
 import errno
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
 
-hops_thresholds = []
-count_thresholds = []
-hops_threshold_start = 1
-hops_threshold_stepping = 1
-hops_threshold_maximum = 10
-count_threshold_start = 1
-count_threshold_stepping = 4
-count_threshold_maximum = 65535
-
-def next_hops(current_hops):
-    return current_hops + hops_threshold_stepping
-
-def next_count(current_count):
-    return (current_count+1)*count_threshold_stepping-1
-
-hops = hops_threshold_start
-while hops <= hops_threshold_maximum:
-    hops_thresholds.append(hops)
-    hops = next_hops(hops)
-
-count = count_threshold_start
-while count <= count_threshold_maximum:
-    count_thresholds.append(count)
-    count = next_count(count)
+hops_thresholds = get_hops_thresholds()
+count_thresholds = get_count_thresholds()
 
 os.chdir("../workloads")
 PIM_ROOT = os.getcwd() +"/"

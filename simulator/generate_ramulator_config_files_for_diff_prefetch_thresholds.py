@@ -1,23 +1,12 @@
 import sys
 import os
 import errno
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
 
-hops_thresholds = []
-count_thresholds = []
-hops_threshold_start = 1
-hops_threshold_stepping = 1
-hops_threshold_maximum = 10
-count_threshold_start = 1
-count_threshold_stepping = 4
-count_threshold_maximum = 65535
+hops_thresholds = get_hops_thresholds()
+count_thresholds = get_count_thresholds()
 ramulator_config_dir = os.path.join(os.getcwd(), "ramulator-configs")
 template_dir = os.path.join(ramulator_config_dir, "HMC-SwapSubscriptionPF-config-template.cfg")
-
-def next_hops(current_hops):
-    return current_hops + hops_threshold_stepping
-
-def next_count(current_count):
-    return (current_count+1)*count_threshold_stepping-1
 
 def mkdir_p(directory):
     try:
@@ -30,12 +19,8 @@ def mkdir_p(directory):
 
 mkdir_p(os.path.join(ramulator_config_dir, "prefetcher"))
 
-hops = hops_threshold_start
-while hops <= hops_threshold_maximum:
-    hops_thresholds.append(hops)
-    count = count_threshold_start
-    while count <= count_threshold_maximum:
-        count_thresholds.append(count)
+for hops in hops_thresholds:
+    for count in count_thresholds:
         output_dir = os.path.join(ramulator_config_dir, "prefetcher", "HMC-SwapSubscriptionPF-"+str(hops)+"h"+str(count)+"c-config.cfg")
         with open(template_dir, "r") as ins:
             config_file = open(output_dir,"w")
@@ -45,7 +30,3 @@ while hops <= hops_threshold_maximum:
                 config_file.write(line)
             config_file.close()
         ins.close()
-        count = next_count(count)
-    hops = next_hops(hops)
-
-
