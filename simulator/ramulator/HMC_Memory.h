@@ -169,8 +169,10 @@ public:
     class SubscriptionPrefetcherSet {
     private:
       static const int COUNTER_TABLE_SIZE = 1024;
+      static const int SUBSCRIPTION_TABLE_SIZE = 1024;
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
+      int subscription_table_ways = SUBSCRIPTION_TABLE_SIZE;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
@@ -311,6 +313,9 @@ public:
         }
       }
     };
+    
+    SubscriptionPrefetcherSet<uint32_t> prefetcher_set;
+
     vector<int> addr_bits;
     vector<vector <int> > address_distribution;
 
