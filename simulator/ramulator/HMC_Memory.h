@@ -408,11 +408,7 @@ public:
         }
 
         if (configs.contains("prefetcher_hops_threshold")) {
-<<<<<<< HEAD
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
-=======
-          prefetcher_set.set_prefetch_count_threshold(stoi(configs["prefetcher_hops_threshold"]));
->>>>>>> 4bff413d60a510a3d8eba14f8b9447ab717bb548
         }
 
         // regStats
