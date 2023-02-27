@@ -14,7 +14,7 @@ def mkdir_p(directory):
         else:
             raise
 
-maximum_thread = 10
+maximum_thread = 80
 threads = []
 output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -49,24 +49,40 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function):
 #     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
 #     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
 #     "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
+#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+#     "ligra" : ["PageRank_edgeMapDenseUSA"],
+#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"],
+#     "rodinia" : ["BFS_BFS"],
+#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
+
 benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
-    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hashjoin" : ["NPO_probehashtable"],
     "ligra" : ["PageRank_edgeMapDenseUSA"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"],
-    "rodinia" : ["BFS_BFS"],
-    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale"]}
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 # processor_types = ["host_ooo/prefetch", "host_ooo/no_prefetch", "pim_ooo"]
-processor_types = ["pim_ooo", "pim_ooo_netoh", "pim_ooo_netoh_withswapsubpf"]
+processor_types = ["pim_ooo_netoh"]
 # core_numbers = ["1", "4", "16", "64", "256"]
 core_numbers = ["32"]
+
+total_experiment_count = 0
+for suite in benchmark_suites_and_benchmarks_functions.keys():
+    total_experiment_count += len(benchmark_suites_and_benchmarks_functions[suite])
+total_experiment_count *= len(processor_types)
+total_experiment_count *= len(core_numbers)
+print "Starting experiments. There are " + str(total_experiment_count) + " experiments to be scheduled, for cores: " + str(core_numbers) + " and processor types: " + str(processor_types)
+scheduled_experiments = 0
 
 for suite in benchmark_suites_and_benchmarks_functions.keys():
     for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
         for processor_type in processor_types:
             for core_number in core_numbers:
-                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type + " and " + core_number + " core(s)"
+                scheduled_experiments += 1
+                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
                 current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
                 threads.append(current_thread)
                 current_thread.start()

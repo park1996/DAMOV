@@ -9,6 +9,7 @@
 simulator/zsim_stats*/*
 *.out
 *.csv
+*.pyc
 simulator/build/*
 simulator/config_files/*
 simulator/config_files*
@@ -17,8 +18,8 @@ simulator/.sconsign.dblite
 simulator/libconfig/
 simulator/libconfig/*
 simulator/libconfig/*/*
-simulator/ramulator-configs/prefetcher/*
-simulator/ramulator-configs/prefetcher/
+simulator/ramulator-configs/prefetcher*/*
+simulator/ramulator-configs/prefetcher*/
 .vscode
 .vscode/*
 simulator/execution_statuses*

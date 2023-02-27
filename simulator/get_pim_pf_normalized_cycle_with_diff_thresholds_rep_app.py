@@ -33,10 +33,11 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO
     "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 processor_type_prefix = "pim_prefetch_netoh_"
+baseline_processor_type = "pim_ooo_netoh"
 prefetcher_types = ["swap"]
 core_number = "32"
 
-output_filename = "stats_cycle_pim_pf_with_diff_thresholds_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".csv"
+output_filename = "stats_normalized_cycle_pim_pf_with_diff_thresholds_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".csv"
 output_filename = os.path.join(os.getcwd(), output_filename)
 stats_folders = os.path.join(os.getcwd(), "zsim_stats")
 
@@ -44,8 +45,14 @@ with open(output_filename, mode='w') as csv_file:
     csv_writer = csv.writer(csv_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     for suite in benchmark_suites_and_benchmarks_functions.keys():
         for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
+            full_benchmark_name = suite+"_"+benchmark_function
+            baseline_cycle = 0
+            baseline_stat_file_location = os.path.join(stats_folders, baseline_processor_type, core_number, full_benchmark_name+".zsim.out")
+            if os.path.isfile(stat_file_location):
+                baseline_cycle = extract_cycle(baseline_stat_file_location)
+            if baseline_cycle == 0:
+                continue
             for prefetcher_type in prefetcher_types:
-                full_benchmark_name = suite+"_"+benchmark_function
                 csv_writer.writerow([full_benchmark_name+" with "+prefetcher_type+" prefetcher"])
                 csv_writer.writerow(count_thresholds_str)
                 for hops_threshold in hops_thresholds:
@@ -57,7 +64,7 @@ with open(output_filename, mode='w') as csv_file:
                             current_line.append("N/A")
                             continue
                         cycle_val = extract_cycle(stat_file_location)
-                        current_line.append("N/A" if cycle_val == 0 else str(cycle_val))
+                        current_line.append("N/A" if cycle_val == 0 else str(float(baseline_cycle)/float(cycle_val)))
                     csv_writer.writerow(current_line)
                 csv_writer.writerow('')
 
