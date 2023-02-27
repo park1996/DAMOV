@@ -8,7 +8,7 @@
 #include <list>
 #include <string>
 #include <vector>
-
+#include <unordered_map>
 #include "Controller.h"
 #include "Scheduler.h"
 
@@ -198,6 +198,41 @@ public:
     Queue otherq;  // queue for all "other" requests (e.g., refresh)
     Queue overflow;
 
+    struct PendingQueue {
+        deque<Request> q;
+        deque<Request> arrivel_q;
+        unsigned int size() {return q.size();}
+        void update(){
+          deque<Request> tmp;
+          for (auto& i : arrivel_q) {
+            assert(i.hops <= MAX_HOP);
+            if(i.hops == 0){
+              q.push_back(i);
+              continue;
+            }
+            i.hops -= 1;
+            tmp.push_back(i);
+          }
+          arrivel_q = tmp;
+        }
+        void arrive(Request& req) {
+            assert(req.hops <= MAX_HOP);
+            if(req.hops == 0) {
+                q.push_back(req);
+            } else {
+                arrivel_q.push_back(req);
+            }
+        }
+        void push_back(Request& req){
+            if(req.hops == 0) {
+                q.push_back(req);
+            } else {
+                arrivel_q.push_back(req);
+            }
+        }
+        void pop_front(){q.pop_front();}
+    };
+
     deque<Request> pending;  // read requests that are about to receive data from DRAM
     deque<Request> pending_write;  //write requests that are about to receive data from DRAM
 
@@ -220,7 +255,6 @@ public:
     deque<Packet> response_packets_buffer;
     map<long, Packet> incoming_packets_buffer;
     bool pim_mode_enabled = false;
-
 
     /* Constructor */
     Controller(const Config& configs, DRAM<HMC>* channel) :
