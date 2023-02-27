@@ -48,7 +48,7 @@ with open(output_filename, mode='w') as csv_file:
             full_benchmark_name = suite+"_"+benchmark_function
             baseline_cycle = 0
             baseline_stat_file_location = os.path.join(stats_folders, baseline_processor_type, core_number, full_benchmark_name+".zsim.out")
-            if os.path.isfile(stat_file_location):
+            if os.path.isfile(baseline_stat_file_location):
                 baseline_cycle = extract_cycle(baseline_stat_file_location)
             if baseline_cycle == 0:
                 continue
