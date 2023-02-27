@@ -90,7 +90,6 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
                     print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
                     while threading.active_count() >= maximum_thread + 1:
                         time.sleep(1)
-
-with open("execution_statuses.txt", "w") as status_file:
-    for experiment in thread_statuses.keys():
-        status_file.write("Experiment " + experiment + " is completed with status " + thread_statuses[experiment]+"\n")
+print "The main thread has started all threads. Now waiting for threads to finish..."
+for thread in threads:
+    thread.join()
