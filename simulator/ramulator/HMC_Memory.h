@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <array>
+#include <climits>
 
 using namespace std;
 
@@ -86,6 +87,7 @@ protected:
 
   long mem_req_count = 0;
   bool num_cores;
+  int max_block_col_bits;
 public:
     long clk = 0;
     bool pim_mode_enabled = false;
@@ -176,6 +178,7 @@ public:
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
+      Memory<HMC, Controller>* mem_ptr;
       map<vector<int>, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
       struct SubscriptionTask {
         vector<int> addr_vec;
@@ -186,7 +189,7 @@ public:
       list<SubscriptionTask> pending_subscription;
       list<SubscriptionTask> pending_unsubscription;
     public:
-      SubscriptionPrefetcherSet(int controllers) {
+      SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):mem_ptr(mem_ptr) {
         array<TableType, COUNTER_TABLE_SIZE> zero_array;
         std::fill(std::begin(zero_array), std::end(zero_array), 0);
         count_tables.assign(controllers, zero_array);
@@ -194,9 +197,11 @@ public:
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
       void set_prefetch_hops_threshold(int threshold) {
         prefetch_hops_threshold = threshold;
+        cout << "Prefetcher hops threshold: " << prefetch_hops_threshold << endl;
       }
       void set_prefetch_count_threshold(int threshold) {
         prefetch_count_threshold = threshold;
+        cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
       }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
@@ -325,7 +330,7 @@ public:
         : ctrls(ctrls),
           spec(ctrls[0]->channel->spec),
           addr_bits(int(HMC::Level::MAX)),
-          prefetcher_set(ctrls.size())
+          prefetcher_set(ctrls.size(), this)
     {
         // make sure 2^N channels/ranks
         // TODO support channel number that is not powers of 2
@@ -416,6 +421,7 @@ public:
         if (configs.contains("prefetcher_hops_threshold")) {
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
+        max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
 
         // regStats
         dram_capacity
@@ -841,11 +847,138 @@ public:
       }
     }
 
+    long address_vector_to_address(const vector<int>& addr_vec) {
+      long addr = 0;
+      long vault = addr_vec[int(HMC::Level::Vault)];
+      long bank_group = addr_vec[int(HMC::Level::BankGroup)];
+      long bank = addr_vec[int(HMC::Level::Bank)];
+      long row = addr_vec[int(HMC::Level::Row)];
+      long column = addr_vec[int(HMC::Level::Column)];
+      // cout << "Address Vector is in Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
+      //   << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)];
+      int column_significant_bits = addr_bits[int(HMC::Level::Column)] - max_block_col_bits;
+      switch(int(type)) {
+        case int(Type::RoCoBaVa): {
+          addr |= row;
+          addr <<= column_significant_bits;
+          addr |= (column >> max_block_col_bits);
+          addr <<= addr_bits[int(HMC::Level::BankGroup)];
+          addr |= bank_group;
+          addr <<= addr_bits[int(HMC::Level::Bank)];
+          addr |= bank;
+          addr <<= addr_bits[int(HMC::Level::Vault)];
+          addr |= vault;
+          addr <<= max_block_col_bits;
+          addr |= column & ((1<<max_block_col_bits) - 1);
+        }
+        break;
+        case int(Type::RoBaCoVa): {
+          addr |= row;
+          addr <<= addr_bits[int(HMC::Level::BankGroup)];
+          addr |= bank_group;
+          addr <<= addr_bits[int(HMC::Level::Bank)];
+          addr |= bank;
+          addr <<= column_significant_bits;
+          addr |= (column >> max_block_col_bits);
+          addr <<= addr_bits[int(HMC::Level::Vault)];
+          addr |= vault;
+          addr <<= max_block_col_bits;
+          addr |= column & ((1<<max_block_col_bits) - 1);
+        }
+        break;
+        case int(Type::RoCoBaBgVa): {
+          addr |= row;
+          addr <<= column_significant_bits;
+          addr |= (column >> max_block_col_bits);
+          addr <<= addr_bits[int(HMC::Level::Bank)];
+          addr |= bank;
+          addr <<= addr_bits[int(HMC::Level::BankGroup)];
+          addr |= bank_group;
+          addr <<= addr_bits[int(HMC::Level::Vault)];
+          addr |= vault;
+          addr <<= max_block_col_bits;
+          addr |= column & ((1<<max_block_col_bits) - 1);
+        }
+        break;
+        default:
+            assert(false);
+      }
+      // cout << " and after translation, the original address is: " << addr << endl;
+      return addr;
+    }
+
+    vector<int> address_to_address_vector(const long& addr) {
+      long local_addr = addr;
+      // cout << "The input address is " << addr;
+      vector<int> addr_vec;
+      addr_vec.resize(addr_bits.size());
+      switch(int(type)) {
+          case int(Type::RoCoBaVa): {
+            addr_vec[int(HMC::Level::Column)] =
+                slice_lower_bits(local_addr, max_block_col_bits);
+            addr_vec[int(HMC::Level::Vault)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Vault)]);
+            addr_vec[int(HMC::Level::Bank)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Bank)]);
+            addr_vec[int(HMC::Level::BankGroup)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::BankGroup)]);
+            int column_MSB_bits =
+              slice_lower_bits(
+                  local_addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
+            addr_vec[int(HMC::Level::Column)] =
+              addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
+            addr_vec[int(HMC::Level::Row)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Row)]);
+          }
+          break;
+          case int(Type::RoBaCoVa): {
+            addr_vec[int(HMC::Level::Column)] =
+                slice_lower_bits(local_addr, max_block_col_bits);
+            addr_vec[int(HMC::Level::Vault)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Vault)]);
+            int column_MSB_bits =
+              slice_lower_bits(
+                  local_addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
+            addr_vec[int(HMC::Level::Column)] =
+              addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
+            addr_vec[int(HMC::Level::Bank)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Bank)]);
+            addr_vec[int(HMC::Level::BankGroup)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::BankGroup)]);
+            addr_vec[int(HMC::Level::Row)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Row)]);
+          }
+          break;
+          case int(Type::RoCoBaBgVa): {
+            addr_vec[int(HMC::Level::Column)] =
+                slice_lower_bits(local_addr, max_block_col_bits);
+            addr_vec[int(HMC::Level::Vault)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Vault)]);
+            addr_vec[int(HMC::Level::BankGroup)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::BankGroup)]);
+            addr_vec[int(HMC::Level::Bank)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Bank)]);
+            int column_MSB_bits =
+              slice_lower_bits(
+                  local_addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
+            addr_vec[int(HMC::Level::Column)] =
+              addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
+            addr_vec[int(HMC::Level::Row)] =
+                slice_lower_bits(local_addr, addr_bits[int(HMC::Level::Row)]);
+          }
+          break;
+          default:
+              assert(false);
+        }
+        // cout << " And after translation, it is in Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
+        //     << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)] << endl;
+        return addr_vec;
+    }
+
     bool send(Request req)
     {
       //  cout << "receive request packets@host controller with address " << req.addr << endl;
         req._addr = req.addr;
-        req.addr_vec.resize(addr_bits.size());
         req.reqid = mem_req_count;
 
 
@@ -855,71 +988,10 @@ public:
 
         // Each transaction size is 2^tx_bits, so first clear the lowest tx_bits bits
         clear_lower_bits(addr, tx_bits);
+        vector<int> addr_vec = address_to_address_vector(addr);
+        req.addr_vec = addr_vec;
 
-        switch(int(type)) {
-          case int(Type::RoCoBaVa): {
-            int max_block_col_bits =
-                spec->maxblock_entry.flit_num_bits - tx_bits;
-            req.addr_vec[int(HMC::Level::Column)] =
-                slice_lower_bits(addr, max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Vault)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Vault)]);
-            req.addr_vec[int(HMC::Level::Bank)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Bank)]);
-            req.addr_vec[int(HMC::Level::BankGroup)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::BankGroup)]);
-            int column_MSB_bits =
-              slice_lower_bits(
-                  addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Column)] =
-              req.addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Row)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Row)]);
-          }
-          break;
-          case int(Type::RoBaCoVa): {
-            int max_block_col_bits =
-                spec->maxblock_entry.flit_num_bits - tx_bits;
-            req.addr_vec[int(HMC::Level::Column)] =
-                slice_lower_bits(addr, max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Vault)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Vault)]);
-            int column_MSB_bits =
-              slice_lower_bits(
-                  addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Column)] =
-              req.addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Bank)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Bank)]);
-            req.addr_vec[int(HMC::Level::BankGroup)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::BankGroup)]);
-            req.addr_vec[int(HMC::Level::Row)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Row)]);
-          }
-          break;
-          case int(Type::RoCoBaBgVa): {
-            int max_block_col_bits =
-                spec->maxblock_entry.flit_num_bits - tx_bits;
-            req.addr_vec[int(HMC::Level::Column)] =
-                slice_lower_bits(addr, max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Vault)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Vault)]);
-            req.addr_vec[int(HMC::Level::BankGroup)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::BankGroup)]);
-            req.addr_vec[int(HMC::Level::Bank)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Bank)]);
-            int column_MSB_bits =
-              slice_lower_bits(
-                  addr, addr_bits[int(HMC::Level::Column)] - max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Column)] =
-              req.addr_vec[int(HMC::Level::Column)] | (column_MSB_bits << max_block_col_bits);
-            req.addr_vec[int(HMC::Level::Row)] =
-                slice_lower_bits(addr, addr_bits[int(HMC::Level::Row)]);
-          }
-          break;
-          default:
-              assert(false);
-        }
+
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           req.addr_vec[int(HMC::Level::Vault)] = 
             prefetcher_set.find_vault(req.addr_vec, req.addr_vec[int(HMC::Level::Vault)]);
