@@ -282,6 +282,13 @@ public:
         }
         return original_vault;
       }
+      void translate_address(Request& req) {
+        vector<int> addr_vec = req.addr_vec;
+        addr_vec[int(HMC::Level::MAX)] = 0; // Clear the MAX since it's not used. To prevent aliasing
+        if(address_translation_table.count(addr_vec)) {
+          req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr_vec];
+        }
+      }
       void pre_process_addr(long& addr) {
         mem_ptr -> clear_lower_bits(addr, mem_ptr -> tx_bits + 1);
       }
@@ -1002,8 +1009,7 @@ public:
 
 
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
-          req.addr_vec[int(HMC::Level::Vault)] = 
-            prefetcher_set.find_vault(req.addr_vec, req.addr_vec[int(HMC::Level::Vault)]);
+          prefetcher_set.translate_address(req);
         }
 
 
