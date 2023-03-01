@@ -11,6 +11,7 @@
 #include <vector>
 #include <array>
 #include <climits>
+#include <bitset>
 
 using namespace std;
 
@@ -281,10 +282,14 @@ public:
         }
         return original_vault;
       }
+      void pre_process_addr(long& addr) {
+        mem_ptr -> clear_lower_bits(addr, mem_ptr -> tx_bits + 1);
+      }
       void update_counter_table(const Request& req) {
         long addr = req.addr;
+        pre_process_addr(addr);
         int req_vault_id = req.coreid;
-        long table_index = addr / 64 % COUNTER_TABLE_SIZE; // 64 bits per flip, and we prefetch by flip
+        long table_index = addr % COUNTER_TABLE_SIZE; // 64 bits per flip, and we prefetch by flip
         TableType table_entry = count_tables[req_vault_id][table_index]; // Requesting core is in charge of keeping track
         TableType tag = 0;
         long temp_addr = addr;
@@ -422,6 +427,7 @@ public:
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
+        cout << "maxblock_entry.flit_num_bits: " << spec->maxblock_entry.flit_num_bits << " tx_bits: " << tx_bits << " max_block_col_bits: " << max_block_col_bits << endl;
 
         // regStats
         dram_capacity
@@ -981,14 +987,17 @@ public:
         req._addr = req.addr;
         req.reqid = mem_req_count;
 
-
+        // cout << "Address before bit operation is " << bitset<64>(req.addr) << endl;
         clear_higher_bits(req.addr, max_address-1ll);
+        // cout << "Address after clear higher bits is" << bitset<64>(req.addr) << endl;
         long addr = req.addr;
         long coreid = req.coreid;
 
         // Each transaction size is 2^tx_bits, so first clear the lowest tx_bits bits
         clear_lower_bits(addr, tx_bits);
+        // cout << "Address after clear lower bits is " << bitset<64>(addr) << endl;
         vector<int> addr_vec = address_to_address_vector(addr);
+        assert(address_vector_to_address(addr_vec) == addr); // Test script to make sure the implementation is correct.
         req.addr_vec = addr_vec;
 
 
