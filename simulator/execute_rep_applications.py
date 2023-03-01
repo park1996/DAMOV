@@ -16,7 +16,7 @@ def mkdir_p(directory):
 
 maximum_thread = 80
 threads = []
-output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
+output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
 mkdir_p(output_dir)
 summary_file_name = "execution_statuses_summary.csv"

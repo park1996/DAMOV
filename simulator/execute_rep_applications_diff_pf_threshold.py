@@ -21,7 +21,7 @@ count_thresholds = get_count_thresholds()
 
 maximum_thread = 80
 threads = []
-output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%d-%m_%H-%M-%S")
+output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%n-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
 mkdir_p(output_dir)
 summary_file_name = "execution_statuses_summary.csv"
@@ -65,7 +65,7 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
 #     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gemver"], 
 #     "stream" : ["Triad_Triad"]}
 
-processor_types = []
+processor_types = ["pim_ooo_netoh"] # Include one for baseline
 core_numbers = ["32"]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["swap"]
