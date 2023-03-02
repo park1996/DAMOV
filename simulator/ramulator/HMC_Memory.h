@@ -180,12 +180,12 @@ public:
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
       Memory<HMC, Controller>* mem_ptr;
-      map<vector<int>, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
+      map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
       struct SubscriptionTask {
-        vector<int> addr_vec;
+        long addr;
         int req_vault;
         int hops;
-        SubscriptionTask(const vector<int>& addr_vec, int req_vault, int hops):addr_vec(addr_vec),req_vault(req_vault),hops(hops){}
+        SubscriptionTask(long addr, int req_vault, int hops):addr(addr),req_vault(req_vault),hops(hops){}
       };
       list<SubscriptionTask> pending_subscription;
       list<SubscriptionTask> pending_unsubscription;
@@ -208,53 +208,55 @@ public:
         // TODO: Implment a good prefetch policy
         return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
       }
-      void immediate_unsubscribe_address(const vector<int>& addr_vec) {
-        address_translation_table.erase(addr_vec);
+      void immediate_unsubscribe_address(long addr) { // unless otherwise specifiedd, "addr" in arguments below are preprocessed addresses
+        address_translation_table.erase(addr);
       }
-      void immediate_subscribe_address(const vector<int>& addr_vec, int vault) {
+      void immediate_subscribe_address(long addr, int vault) {
         // cout << "Actually ubscribing address Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
         //     << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
         //     << " to Vault " << vault << endl;
-        immediate_unsubscribe_address(addr_vec); // Unscribe first to make sure we're not having any issues
-        address_translation_table[addr_vec] = vault; // Subscribe the remote vault to local vault
+        immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
+        address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
       }
-      void unsubscribe_address(vector<int> addr_vec) {
-        addr_vec[int(HMC::Level::MAX)] = 0; // Clear the MAX since it's not used. To prevent aliasing
-        if(address_translation_table.count(addr_vec) == 0) {
+      void unsubscribe_address(long addr) {
+        if(address_translation_table.count(addr) == 0) {
             return; // If there is no local record, do nothing.
         }
-        int hops = calculate_hops_travelled(addr_vec[int(HMC::Level::Vault)], address_translation_table[addr_vec], WRITE_LENGTH);
+        vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
+        int hops = calculate_hops_travelled(addr_vec[int(HMC::Level::Vault)], address_translation_table[addr], WRITE_LENGTH);
         vector<int> victim_vec(addr_vec);
-        victim_vec[int(HMC::Level::Vault)] = address_translation_table[addr_vec]; // We find the original page to swap back
-        submit_unsubscription(addr_vec, address_translation_table[addr_vec], hops);
-        if(address_translation_table.count(victim_vec) != 0) {
-            submit_unsubscription(victim_vec, address_translation_table[victim_vec], hops);
+        victim_vec[int(HMC::Level::Vault)] = address_translation_table[addr]; // We find the original page to swap back
+        long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
+        submit_unsubscription(addr, address_translation_table[addr], hops);
+        if(address_translation_table.count(victim_addr) != 0) {
+            submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
       }
-      void subscribe_address(vector<int> addr_vec, int req_vault, int val_vault) {
+      void subscribe_address(long addr, int req_vault, int val_vault) {
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
         // cout << "Queuing address Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
         //   << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
         //   << " From Vault " << val_vault << " to Vault for subscribe " << req_vault << " it will take effect in " << hops << " cycles" << endl;
-        addr_vec[int(HMC::Level::MAX)] = 0; // Clear the MAX since it's not used. To prevent aliasing
+        vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
         vector<int> victim_vec(addr_vec);
         victim_vec[int(HMC::Level::Vault)] = req_vault; // We are locating the page in the local vault's same row & column for swapping with the remote vault
-        submit_subscription(addr_vec, req_vault, hops); // Submit to wait for given number of cycles
-        submit_subscription(victim_vec, val_vault, hops);
+        long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
+        submit_subscription(addr, req_vault, hops); // Submit to wait for given number of cycles
+        submit_subscription(victim_addr, val_vault, hops);
       }
-      void submit_subscription(const vector<int>& addr_vec, int mapped_vault, int hops) {
-        SubscriptionTask task(addr_vec, mapped_vault, hops);
+      void submit_subscription(long addr, int mapped_vault, int hops) {
+        SubscriptionTask task(addr, mapped_vault, hops);
         pending_subscription.push_back(task);
       }
-      void submit_unsubscription(const vector<int>& addr_vec, int mapped_vault, int hops) {
-        SubscriptionTask task(addr_vec, mapped_vault, hops);
+      void submit_unsubscription(long addr, int mapped_vault, int hops) {
+        SubscriptionTask task(addr, mapped_vault, hops);
         pending_unsubscription.push_back(task);
       }
       void tick() {
         list<SubscriptionTask> new_pending_subscription;
         for (auto& i : pending_subscription) {
           if(i.hops == 0){
-            immediate_subscribe_address(i.addr_vec, i.req_vault);
+            immediate_subscribe_address(i.addr, i.req_vault);
             continue;
           } // Safety Check
 
@@ -266,7 +268,7 @@ public:
         list<SubscriptionTask> new_pending_unsubscription;
         for (auto& i : pending_unsubscription) {
           if(i.hops == 0){
-            immediate_unsubscribe_address(i.addr_vec);
+            immediate_unsubscribe_address(i.addr);
             continue;
           } // Safety Check
 
@@ -275,23 +277,23 @@ public:
         }
         pending_unsubscription = new_pending_unsubscription;
       }
-      int find_vault(vector<int> addr_vec, int original_vault) {
-        addr_vec[int(HMC::Level::MAX)] = 0; // Clear the MAX since it's not used. To prevent aliasing
-        if(address_translation_table.count(addr_vec)) {
-          return address_translation_table[addr_vec];
+      int find_vault(long addr, int original_vault) {
+        if(address_translation_table.count(addr)) {
+          return address_translation_table[addr];
         }
         return original_vault;
-      }
-      void translate_address(Request& req) {
-        vector<int> addr_vec = req.addr_vec;
-        addr_vec[int(HMC::Level::MAX)] = 0; // Clear the MAX since it's not used. To prevent aliasing
-        if(address_translation_table.count(addr_vec)) {
-          req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr_vec];
-        }
       }
       void pre_process_addr(long& addr) {
         mem_ptr -> clear_lower_bits(addr, mem_ptr -> tx_bits + 1);
       }
+      void translate_address(Request& req) {
+        long addr = req.addr;
+        pre_process_addr(addr);
+        if(address_translation_table.count(addr)) {
+          req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr];
+        }
+      }
+
       void update_counter_table(const Request& req) {
         long addr = req.addr;
         pre_process_addr(addr);
@@ -321,12 +323,12 @@ public:
         if(count >= ((TableType)1 << COUNTER_BITS)) {
           count = ((TableType)1 << COUNTER_BITS) - 1;
         }
-        int val_vault_id = find_vault(req.addr_vec, req.addr_vec[int(HMC::Level::Vault)]);
+        int val_vault_id = find_vault(addr, req.addr_vec[int(HMC::Level::Vault)]);
         TableType hops = calculate_hops_travelled(req_vault_id, val_vault_id, OTHER_LENGTH);
         count_tables[req_vault_id][table_index] = (tag << (COUNTER_BITS)) | count;
         if(check_prefetch(hops, count)) {
           // cout << "[RAMULATOR] Subscribing memory from vault " << req.addr_vec[int(HMC::Level::Vault)] << " to core " << req.coreid << ". Inserted in index " << table_index << endl;
-          subscribe_address(req.addr_vec, req_vault_id, val_vault_id);
+          subscribe_address(addr, req_vault_id, val_vault_id);
         }
       }
     };
