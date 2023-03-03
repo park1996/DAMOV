@@ -19,9 +19,9 @@ def mkdir_p(directory):
 hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
 
-maximum_thread = 80
+maximum_thread = 70
 threads = []
-output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%n-%d_%H-%M-%S")
+output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
 mkdir_p(output_dir)
 summary_file_name = "execution_statuses_summary.csv"
