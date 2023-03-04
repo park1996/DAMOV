@@ -171,8 +171,9 @@ public:
     template <typename TableType>
     class SubscriptionPrefetcherSet {
     private:
-      static const int COUNTER_TABLE_SIZE = 1024;
-      static const int SUBSCRIPTION_TABLE_SIZE = 1024;
+      static const size_t COUNTER_TABLE_SIZE = 1024;
+      static const size_t SUBSCRIPTION_TABLE_SIZE = 131072;
+      static const size_t SUBSCRIPTION_BUFFER_SIZE = SIZE_MAX; // TODO: Actually find a reasonable buffer size
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
       int subscription_table_ways = SUBSCRIPTION_TABLE_SIZE;
@@ -180,15 +181,24 @@ public:
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
       Memory<HMC, Controller>* mem_ptr;
-      map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
+      struct SubscriptionTableEntry {
+        int vault;
+        long last_accessed;
+        SubscriptionTableEntry(int vault, long last_accessed):vault(vault),last_accessed(last_accessed){}
+        SubscriptionTableEntry():vault(-1),last_accessed(0){} // Default constructor. Otherwise map will have weird error
+      };
+      // TODO: Decrease the associativity of this table
+      // TODO (To be confirmed): Split this table by each core
+      map<long, SubscriptionTableEntry> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
       struct SubscriptionTask {
         long addr;
         int req_vault;
         int hops;
         SubscriptionTask(long addr, int req_vault, int hops):addr(addr),req_vault(req_vault),hops(hops){}
       };
-      list<SubscriptionTask> pending_subscription;
+      list<SubscriptionTask> pending_subscription; // Tasks in pending_subscription and pending_unsubscription are being communicated via the network
       list<SubscriptionTask> pending_unsubscription;
+      list<SubscriptionTask> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
     public:
       SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):mem_ptr(mem_ptr) {
         array<TableType, COUNTER_TABLE_SIZE> zero_array;
@@ -196,6 +206,18 @@ public:
         count_tables.assign(controllers, zero_array);
       }
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
+      bool subscription_table_is_free(long addr) const {return address_translation_table.size() < SUBSCRIPTION_TABLE_SIZE;}
+      bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < SUBSCRIPTION_BUFFER_SIZE;}
+      long find_victim_for_unsubscription(long addr) const {
+        long earliest_access = mem_ptr -> clk + 1; // Use one cycle in the future as the initial access timestamp to start
+        long victim = 0;
+        for(auto const& i : address_translation_table) {
+          if(i.second.last_accessed <= earliest_access) {
+            victim = i.first;
+          }
+        }
+        return victim;
+      }
       void set_prefetch_hops_threshold(int threshold) {
         prefetch_hops_threshold = threshold;
         cout << "Prefetcher hops threshold: " << prefetch_hops_threshold << endl;
@@ -216,20 +238,20 @@ public:
         //     << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
         //     << " to Vault " << vault << endl;
         immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
-        address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
+        address_translation_table[addr] = SubscriptionTableEntry(vault, mem_ptr -> clk); // Subscribe the remote vault to local vault
       }
       void unsubscribe_address(long addr) {
         if(address_translation_table.count(addr) == 0) {
             return; // If there is no local record, do nothing.
         }
         vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
-        int hops = calculate_hops_travelled(addr_vec[int(HMC::Level::Vault)], address_translation_table[addr], WRITE_LENGTH);
+        int hops = calculate_hops_travelled(addr_vec[int(HMC::Level::Vault)], address_translation_table[addr].vault, WRITE_LENGTH);
         vector<int> victim_vec(addr_vec);
-        victim_vec[int(HMC::Level::Vault)] = address_translation_table[addr]; // We find the original page to swap back
+        victim_vec[int(HMC::Level::Vault)] = address_translation_table[addr].vault; // We find the original page to swap back
         long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
-        submit_unsubscription(addr, address_translation_table[addr], hops);
+        submit_unsubscription(addr, address_translation_table[addr].vault, hops);
         if(address_translation_table.count(victim_addr) != 0) {
-            submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
+            submit_unsubscription(victim_addr, address_translation_table[victim_addr].vault, hops);
         }
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
@@ -253,10 +275,33 @@ public:
         pending_unsubscription.push_back(task);
       }
       void tick() {
+        // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
+        list<SubscriptionTask> new_subscription_buffer;
+        for (auto& i : subscription_buffer) {
+          if(subscription_table_is_free(i.addr)) {
+            immediate_subscribe_address(i.addr, i.req_vault);
+          } else {
+            new_subscription_buffer.push_back(i);
+          }
+        }
+        subscription_buffer = new_subscription_buffer;
+
+        // Then, we process the transfer of subscription requests in the network
         list<SubscriptionTask> new_pending_subscription;
         for (auto& i : pending_subscription) {
           if(i.hops == 0){
-            immediate_subscribe_address(i.addr, i.req_vault);
+            if(subscription_table_is_free(i.addr)) {
+              immediate_subscribe_address(i.addr, i.req_vault);
+            } else {
+              // if the subscription is full when the request arrives, we try to free up a subscription table entry
+              long victim_addr = find_victim_for_unsubscription(i.addr);
+              unsubscribe_address(victim_addr);
+              // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
+              // If the buffer is even full, we do nothing further (and there is nothing we can do)
+              if(subscription_buffer_is_free(i.addr)) {
+                subscription_buffer.push_back(i);
+              }
+            }
             continue;
           } // Safety Check
 
@@ -265,6 +310,7 @@ public:
         }
         pending_subscription = new_pending_subscription;
 
+        // Last, we process the pending unsubscription requests in the network
         list<SubscriptionTask> new_pending_unsubscription;
         for (auto& i : pending_unsubscription) {
           if(i.hops == 0){
@@ -279,7 +325,7 @@ public:
       }
       int find_vault(long addr, int original_vault) {
         if(address_translation_table.count(addr)) {
-          return address_translation_table[addr];
+          return address_translation_table[addr].vault;
         }
         return original_vault;
       }
@@ -290,7 +336,8 @@ public:
         long addr = req.addr;
         pre_process_addr(addr);
         if(address_translation_table.count(addr)) {
-          req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr];
+          req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr].vault;
+          address_translation_table[addr].last_accessed = mem_ptr -> clk;
         }
       }
 
