@@ -279,6 +279,7 @@ public:
         list<SubscriptionTask> new_subscription_buffer;
         for (auto& i : subscription_buffer) {
           if(subscription_table_is_free(i.addr)) {
+            cout << "We have something in the buffer and the subscription table is free. Inserting " << i.addr << " into the table..." << endl;
             immediate_subscribe_address(i.addr, i.req_vault);
           } else {
             new_subscription_buffer.push_back(i);
@@ -294,7 +295,9 @@ public:
               immediate_subscribe_address(i.addr, i.req_vault);
             } else {
               // if the subscription is full when the request arrives, we try to free up a subscription table entry
+              cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
               long victim_addr = find_victim_for_unsubscription(i.addr);
+              cout << "We pick " << i.addr << " to evict from the table." << endl;
               unsubscribe_address(victim_addr);
               // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
               // If the buffer is even full, we do nothing further (and there is nothing we can do)
