@@ -172,7 +172,7 @@ public:
     class SubscriptionPrefetcherSet {
     private:
       static const size_t COUNTER_TABLE_SIZE = 1024;
-      static const size_t SUBSCRIPTION_TABLE_SIZE = 131072;
+      static const size_t SUBSCRIPTION_TABLE_SIZE = SIZE_MAX;
       static const size_t SUBSCRIPTION_BUFFER_SIZE = SIZE_MAX; // TODO: Actually find a reasonable buffer size
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
@@ -206,7 +206,7 @@ public:
         count_tables.assign(controllers, zero_array);
       }
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
-      bool subscription_table_is_free(long addr) const {return address_translation_table.size() < SUBSCRIPTION_TABLE_SIZE;}
+      bool subscription_table_is_free(long addr) const {/*return address_translation_table.size() < SUBSCRIPTION_TABLE_SIZE;*/return true;}
       bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < SUBSCRIPTION_BUFFER_SIZE;}
       long find_victim_for_unsubscription(long addr) const {
         long earliest_access = mem_ptr -> clk + 1; // Use one cycle in the future as the initial access timestamp to start
