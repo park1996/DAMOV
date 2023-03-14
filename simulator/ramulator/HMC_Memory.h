@@ -172,11 +172,11 @@ public:
     class SubscriptionPrefetcherSet {
     private:
       static const size_t COUNTER_TABLE_SIZE = 1024;
-      static const size_t SUBSCRIPTION_TABLE_SIZE = SIZE_MAX;
-      static const size_t SUBSCRIPTION_BUFFER_SIZE = SIZE_MAX; // TODO: Actually find a reasonable buffer size
+      size_t subscription_table_size = SIZE_MAX;
+      size_t subscription_buffer_size = SIZE_MAX; // TODO: Actually find a reasonable buffer size
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
-      int subscription_table_ways = SUBSCRIPTION_TABLE_SIZE;
+      int subscription_table_ways = subscription_table_size;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
@@ -206,16 +206,17 @@ public:
         count_tables.assign(controllers, zero_array);
       }
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
-      bool subscription_table_is_free(long addr) const {/*return address_translation_table.size() < SUBSCRIPTION_TABLE_SIZE;*/return true;}
-      bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < SUBSCRIPTION_BUFFER_SIZE;}
+      bool subscription_table_is_free(long addr) const {return address_translation_table.size() < subscription_table_size;}
+      bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < subscription_buffer_size;}
       long find_victim_for_unsubscription(long addr) const {
-        long earliest_access = mem_ptr -> clk + 1; // Use one cycle in the future as the initial access timestamp to start
-        long victim = 0;
-        for(auto const& i : address_translation_table) {
-          if(i.second.last_accessed <= earliest_access) {
-            victim = i.first;
-          }
-        }
+        // long earliest_access = mem_ptr -> clk + 1; // Use one cycle in the future as the initial access timestamp to start
+        // long victim = 0;
+        // for(auto const& i : address_translation_table) {
+        //   if(i.second.last_accessed <= earliest_access) {
+        //     victim = i.first;
+        //   }
+        // }
+        long victim = address_translation_table.begin()->first; // Using LRU takes too long
         return victim;
       }
       void set_prefetch_hops_threshold(int threshold) {
@@ -225,6 +226,14 @@ public:
       void set_prefetch_count_threshold(int threshold) {
         prefetch_count_threshold = threshold;
         cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
+      }
+      void set_subscription_table_size(int size) {
+        subscription_table_size = size;
+        cout << "Subscription Table size: " << subscription_table_size << endl;
+      }
+      void set_subscription_buffer_size(int size) {
+        subscription_buffer_size = size;
+        cout << "Subscription Buffer size: " << subscription_buffer_size << endl;
       }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
@@ -279,7 +288,7 @@ public:
         list<SubscriptionTask> new_subscription_buffer;
         for (auto& i : subscription_buffer) {
           if(subscription_table_is_free(i.addr)) {
-            cout << "We have something in the buffer and the subscription table is free. Inserting " << i.addr << " into the table..." << endl;
+            // cout << "We have something in the buffer and the subscription table is free. Inserting " << i.addr << " into the table..." << endl;
             immediate_subscribe_address(i.addr, i.req_vault);
           } else {
             new_subscription_buffer.push_back(i);
@@ -295,9 +304,9 @@ public:
               immediate_subscribe_address(i.addr, i.req_vault);
             } else {
               // if the subscription is full when the request arrives, we try to free up a subscription table entry
-              cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
+              // cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
               long victim_addr = find_victim_for_unsubscription(i.addr);
-              cout << "We pick " << i.addr << " to evict from the table." << endl;
+              // cout << "We pick " << i.addr << " to evict from the table." << endl;
               unsubscribe_address(victim_addr);
               // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
               // If the buffer is even full, we do nothing further (and there is nothing we can do)
@@ -484,6 +493,14 @@ public:
 
         if (configs.contains("prefetcher_hops_threshold")) {
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
+        }
+
+        if (configs.contains("prefetcher_subscription_table_size")) {
+          prefetcher_set.set_subscription_table_size(stoi(configs["prefetcher_subscription_table_size"]));
+        }
+
+        if (configs.contains("prefetcher_subscription_buffer_size")) {
+          prefetcher_set.set_subscription_buffer_size(stoi(configs["prefetcher_subscription_buffer_size"]));
         }
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
         cout << "maxblock_entry.flit_num_bits: " << spec->maxblock_entry.flit_num_bits << " tx_bits: " << tx_bits << " max_block_col_bits: " << max_block_col_bits << endl;
@@ -1092,6 +1109,7 @@ public:
             req.hops = hops;
 
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
+              cout << "We are not able to send request with address " << req.addr << endl;
               return false;
             }
             if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {

@@ -170,6 +170,10 @@ public:
         list<Request> q;
         list<Request> arrivel_q;
         unsigned int max = 32; // TODO queue qize
+        void set_max(int max) {
+          this -> max = max;
+          cout << "Queue size is: " << this -> max << endl;
+        }
         unsigned int size() {return q.size();}
         void update(){
           list<Request> tmp;
@@ -292,6 +296,13 @@ public:
           assert(channel->spec->read_latency == channel->spec->speed_entry.nCL);
           assert(channel->spec->speed_entry.nCCDS == 1);
           assert(channel->spec->speed_entry.nCCDL == 1);
+        }
+
+        if (configs.contains("hmc_queue_size")) {
+          readq.set_max(stoi(configs["hmc_queue_size"]));
+          writeq.set_max(stoi(configs["hmc_queue_size"]));
+          otherq.set_max(stoi(configs["hmc_queue_size"]));
+          overflow.set_max(stoi(configs["hmc_queue_size"]));
         }
 
         pim_mode_enabled = configs.pim_mode_enabled();

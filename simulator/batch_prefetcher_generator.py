@@ -7,7 +7,8 @@ def next_count(current_count, count_threshold_stepping):
 
 def get_hops_thresholds():
     hops_threshold_start = 1
-    hops_threshold_stepping = 1
+    # hops_threshold_stepping = 1
+    hops_threshold_stepping = 2
     hops_threshold_maximum = 10
     hops_thresholds = []
     hops = hops_threshold_start
@@ -21,7 +22,8 @@ def get_count_thresholds():
     # count_threshold_stepping = 1
     # count_threshold_maximum = 15
     count_threshold_stepping = 2
-    count_threshold_maximum = 255
+    # count_threshold_maximum = 255
+    count_threshold_maximum = 63
     count_thresholds = []
     count = count_threshold_start
     while count <= count_threshold_maximum:
