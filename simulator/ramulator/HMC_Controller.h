@@ -205,7 +205,7 @@ public:
     struct PendingQueue {
         deque<Request> q;
         deque<Request> arrivel_q;
-        unsigned int size() {return q.size();}
+        unsigned int size() {return q.size()+arrivel_q.size();}
         void update(){
           deque<Request> tmp;
           for (auto& i : arrivel_q) {
