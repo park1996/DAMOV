@@ -9,6 +9,7 @@
 #include "Statistics.h"
 #include <fstream>
 #include <vector>
+#include <unordered_map>
 #include <array>
 #include <climits>
 #include <bitset>
@@ -174,9 +175,14 @@ public:
       static const size_t COUNTER_TABLE_SIZE = 1024;
       size_t subscription_table_size = SIZE_MAX;
       size_t subscription_buffer_size = SIZE_MAX; // TODO: Actually find a reasonable buffer size
+      size_t subscription_buffer_used = 0;
+      size_t address_access_history_size = SIZE_MAX;
+      size_t address_access_history_used = 0;
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
-      int subscription_table_ways = subscription_table_size;
+      size_t subscription_table_ways = subscription_table_size;
+      size_t subscription_table_sets = subscription_table_size / subscription_table_ways;
+      vector<size_t> virtualized_sets;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
@@ -184,18 +190,19 @@ public:
       // TODO: Decrease the associativity of this table
       // TODO (To be confirmed): Split this table by each core
       map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
-      size_t address_access_history_size = SIZE_MAX;
-      list<long> address_access_history;
-      map<long, list<long>::iterator> address_access_history_map;
+      vector<list<long>> address_access_history;
+      map<long, typename list<long>::iterator> address_access_history_map;
       struct SubscriptionTask {
         long addr;
         int req_vault;
         int hops;
         SubscriptionTask(long addr, int req_vault, int hops):addr(addr),req_vault(req_vault),hops(hops){}
+        SubscriptionTask(){}
       };
       list<SubscriptionTask> pending_subscription; // Tasks in pending_subscription and pending_unsubscription are being communicated via the network
       list<SubscriptionTask> pending_unsubscription;
-      list<SubscriptionTask> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
+      vector<list<SubscriptionTask>> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
+      map<long, typename list<SubscriptionTask>::iterator> subscription_buffer_map; // To ensure that we don't put two addresses in the same buffer twice
     public:
       SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):mem_ptr(mem_ptr) {
         array<TableType, COUNTER_TABLE_SIZE> zero_array;
@@ -203,12 +210,10 @@ public:
         count_tables.assign(controllers, zero_array);
       }
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
-      bool subscription_table_is_free(long addr) const {return address_translation_table.size() < subscription_table_size;}
-      bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < subscription_buffer_size;}
-      long find_victim_for_unsubscription(long addr) const {
-        // long victim = address_translation_table.begin()->first; // Using LRU takes too long
-        return address_access_history.back();
-      }
+      size_t get_set(long addr) const {return addr % subscription_table_sets;}
+      bool subscription_table_is_free(long addr) const {return virtualized_sets[get_set(addr)] < subscription_table_ways;}
+      bool subscription_buffer_is_free(long addr) const {return subscription_buffer_used < subscription_buffer_size;}
+      long find_victim_for_unsubscription(long addr) const {return address_access_history[get_set(addr)].back();}
       void set_prefetch_hops_threshold(int threshold) {
         prefetch_hops_threshold = threshold;
         cout << "Prefetcher hops threshold: " << prefetch_hops_threshold << endl;
@@ -219,36 +224,59 @@ public:
       }
       void set_subscription_table_size(int size) {
         subscription_table_size = size;
-        cout << "Subscription Table size: " << subscription_table_size << endl;
+        if(subscription_table_ways == SIZE_MAX){
+          subscription_table_ways = size;
+        }
+      }
+      void set_subscription_table_ways(int ways) {
+        subscription_table_ways = ways;
       }
       void set_subscription_buffer_size(int size) {
         subscription_buffer_size = size;
+      }
+      void initialize_sets(){
+        assert(subscription_table_size % subscription_table_ways == 0);
+        subscription_table_sets = subscription_table_size / subscription_table_ways;
+        cout << "Subscription Table size: " << subscription_table_size << endl;
         cout << "Subscription Buffer size: " << subscription_buffer_size << endl;
+        cout << "Subscription Table Ways: " << subscription_table_ways << endl;
+        cout << "Subscription Table Sets: " << subscription_table_sets << endl; 
+        virtualized_sets.assign(subscription_table_sets, 0);
+        address_access_history.assign(subscription_table_sets, list<long>());
+        subscription_buffer.assign(subscription_table_sets, list<SubscriptionTask>());
       }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
         return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
       }
       void immediate_unsubscribe_address(long addr) { // unless otherwise specifiedd, "addr" in arguments below are preprocessed addresses
-        if(address_access_history_map.count(addr) != 0){
-          address_access_history.erase(address_access_history_map[addr]);
+        if(address_access_history_map.count(addr)){
+          address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
           address_access_history_map.erase(addr);
         }
-        address_translation_table.erase(addr);
+        if(address_translation_table.count(addr)){
+          address_translation_table.erase(addr);
+          if(virtualized_sets[get_set(addr)] > 0) {
+            virtualized_sets[get_set(addr)]--;
+          }
+        }
       }
       void immediate_subscribe_address(long addr, int vault) {
         // cout << "Actually ubscribing address Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
         //     << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
         //     << " to Vault " << vault << endl;
         immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
-        if(address_access_history.size() >= address_access_history_size) {
-          long last = address_access_history.back();
-          address_access_history.pop_back();
+        while(address_access_history_used >= address_access_history_size) {
+          long last = address_access_history[get_set(addr)].back();
+          address_access_history[get_set(addr)].pop_back();
           address_access_history_map.erase(last);
+          address_access_history_used--;
         }
-        address_access_history.push_front(addr);
-        address_access_history_map[addr] = address_access_history.begin();
+        address_access_history[get_set(addr)].push_front(addr);
+        address_access_history_used++;
+        address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
         address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
+        virtualized_sets[get_set(addr)]++;
       }
       void unsubscribe_address(long addr) {
         cout << "Immediately attempting to unsubscribe address " << addr << endl;
@@ -261,7 +289,7 @@ public:
         victim_vec[int(HMC::Level::Vault)] = address_translation_table[addr]; // We find the original page to swap back
         long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
         submit_unsubscription(addr, address_translation_table[addr], hops);
-        if(address_translation_table.count(victim_addr) != 0) {
+        if(address_translation_table.count(victim_addr)) {
             submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
       }
@@ -277,27 +305,19 @@ public:
         submit_subscription(addr, req_vault, hops); // Submit to wait for given number of cycles
         submit_subscription(victim_addr, val_vault, hops);
       }
-      void submit_subscription(long addr, int mapped_vault, int hops) {
-        SubscriptionTask task(addr, mapped_vault, hops);
-        pending_subscription.push_back(task);
-      }
-      void submit_unsubscription(long addr, int mapped_vault, int hops) {
-        SubscriptionTask task(addr, mapped_vault, hops);
-        pending_unsubscription.push_back(task);
-      }
+      void submit_subscription(long addr, int mapped_vault, int hops) {pending_subscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
+      void submit_unsubscription(long addr, int mapped_vault, int hops) {pending_unsubscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
-        // TODO: This logic takes very long time and is simply not feasible. We need to change it to something faster
-        list<SubscriptionTask> new_subscription_buffer;
-        for (auto& i : subscription_buffer) {
-          if(subscription_table_is_free(i.addr)) {
-            // cout << "We have something in the buffer and the subscription table is free. Inserting " << i.addr << " into the table..." << endl;
-            immediate_subscribe_address(i.addr, i.req_vault);
-          } else {
-            new_subscription_buffer.push_back(i);
+        for(int set = 0; set < subscription_table_sets; set++) {
+          while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
+            SubscriptionTask current_task = subscription_buffer[set].front();
+            cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
+            immediate_subscribe_address(current_task.addr, current_task.req_vault);
+            subscription_buffer[set].pop_front();
+            subscription_buffer_used--;
           }
         }
-        subscription_buffer = new_subscription_buffer;
 
         // Then, we process the transfer of subscription requests in the network
         list<SubscriptionTask> new_pending_subscription;
@@ -306,15 +326,28 @@ public:
             if(subscription_table_is_free(i.addr)) {
               immediate_subscribe_address(i.addr, i.req_vault);
             } else {
-              // if the subscription is full when the request arrives, we try to free up a subscription table entry
-              cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
-              long victim_addr = find_victim_for_unsubscription(i.addr);
-              cout << "We pick " << i.addr << " to evict from the table." << endl;
-              unsubscribe_address(victim_addr);
-              // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
-              // If the buffer is even full, we do nothing further (and there is nothing we can do)
-              if(subscription_buffer_is_free(i.addr)) {
-                subscription_buffer.push_back(i);
+              // If the address is already in the subscription buffer, we do not put it in again
+              if(subscription_buffer_map.count(i.addr)) {
+                typename list<SubscriptionTask>::iterator it = subscription_buffer_map[i.addr];
+                // QUESTION: Should we keep the position in queue if the req_vault changes?
+                if(it -> req_vault != i.req_vault) {
+                  it -> req_vault = i.req_vault; // If the subscription task is already in the buffer but to a different address, we change it
+                }
+              // Otherwise, we try to make some new space and insert the task into the buffer
+              } else {
+                // if the subscription is full when the request arrives, we try to free up a subscription table entry
+                cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
+                long victim_addr = find_victim_for_unsubscription(i.addr);
+                cout << "We pick " << i.addr << " to evict from the table." << endl;
+                unsubscribe_address(victim_addr);
+                // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
+                // If the buffer is even full, we do nothing further (and there is nothing we can do)
+                if(subscription_buffer_is_free(i.addr)) {
+                  cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
+                  subscription_buffer[get_set(i.addr)].push_back(i);
+                  subscription_buffer_used++;
+                  subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
+                }
               }
             }
             continue;
@@ -341,11 +374,13 @@ public:
       int find_vault(long addr, int original_vault) {
         if(address_translation_table.count(addr)) {
           if(address_access_history_map.count(addr)) {
-            address_access_history.erase(address_access_history_map[addr]);
+            address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
             address_access_history_map.erase(addr);
+            address_access_history_used--;
           }
-          address_access_history.push_front(addr);
-          address_access_history_map[addr] = address_access_history.begin();
+          address_access_history[get_set(addr)].push_front(addr);
+          address_access_history_used++;
+          address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
           return address_translation_table[addr];
         }
         return original_vault;
@@ -507,9 +542,15 @@ public:
           prefetcher_set.set_subscription_table_size(stoi(configs["prefetcher_subscription_table_size"]));
         }
 
+        if (configs.contains("prefetcher_subscription_table_way")) {
+          prefetcher_set.set_subscription_table_way(stoi(configs["prefetcher_subscription_table_way"]));
+        }
+
+
         if (configs.contains("prefetcher_subscription_buffer_size")) {
           prefetcher_set.set_subscription_buffer_size(stoi(configs["prefetcher_subscription_buffer_size"]));
         }
+        prefetcher_set.initialize_sets();
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
         cout << "maxblock_entry.flit_num_bits: " << spec->maxblock_entry.flit_num_bits << " tx_bits: " << tx_bits << " max_block_col_bits: " << max_block_col_bits << endl;
 
