@@ -182,6 +182,14 @@ public:
       static const int TAG_BITS = 24;
       size_t subscription_table_ways = subscription_table_size;
       size_t subscription_table_sets = subscription_table_size / subscription_table_ways;
+      // Variables used for statistic purposes
+      long total_memory_accesses = 0;
+      long total_successful_subscriptions = 0;
+      long total_unsuccessful_subscriptions = 0;
+      long total_unsubscriptions = 0;
+      long total_buffer_successful_insertation = 0;
+      long total_buffer_unsuccessful_insertation = 0;
+      long total_subscription_from_buffer = 0;
       vector<size_t> virtualized_sets;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
@@ -277,6 +285,7 @@ public:
         address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
         address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
         virtualized_sets[get_set(addr)]++;
+        total_successful_subscriptions++;
       }
       void unsubscribe_address(long addr) {
         cout << "Immediately attempting to unsubscribe address " << addr << endl;
@@ -292,6 +301,7 @@ public:
         if(address_translation_table.count(victim_addr)) {
             submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
+        total_unsubscriptions++;
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
@@ -312,10 +322,11 @@ public:
         for(int set = 0; set < subscription_table_sets; set++) {
           while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
             SubscriptionTask current_task = subscription_buffer[set].front();
-            cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
+            // cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
             immediate_subscribe_address(current_task.addr, current_task.req_vault);
             subscription_buffer[set].pop_front();
             subscription_buffer_used--;
+            total_subscription_from_buffer++;
           }
         }
 
@@ -326,6 +337,7 @@ public:
             if(subscription_table_is_free(i.addr)) {
               immediate_subscribe_address(i.addr, i.req_vault);
             } else {
+              total_unsuccessful_subscriptions++;
               // If the address is already in the subscription buffer, we do not put it in again
               if(subscription_buffer_map.count(i.addr)) {
                 typename list<SubscriptionTask>::iterator it = subscription_buffer_map[i.addr];
@@ -336,9 +348,9 @@ public:
               // Otherwise, we try to make some new space and insert the task into the buffer
               } else {
                 // if the subscription is full when the request arrives, we try to free up a subscription table entry
-                cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
+                // cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
                 long victim_addr = find_victim_for_unsubscription(i.addr);
-                cout << "We pick " << i.addr << " to evict from the table." << endl;
+                // cout << "We pick " << i.addr << " to evict from the table." << endl;
                 unsubscribe_address(victim_addr);
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
@@ -347,6 +359,9 @@ public:
                   subscription_buffer[get_set(i.addr)].push_back(i);
                   subscription_buffer_used++;
                   subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
+                  total_buffer_successful_insertation++;
+                } else {
+                  total_buffer_unsuccessful_insertation++;
                 }
               }
             }
@@ -432,6 +447,17 @@ public:
           // cout << "[RAMULATOR] Subscribing memory from vault " << req.addr_vec[int(HMC::Level::Vault)] << " to core " << req.coreid << ". Inserted in index " << table_index << endl;
           subscribe_address(addr, req_vault_id, val_vault_id);
         }
+        total_memory_accesses++;
+      }
+      void print_stats(){
+        cout << "-----Prefetcher Stats-----" << endl;
+        cout << "Total memory accesses: " << total_memory_accesses << endl;
+        cout << "Total Successful Subscription: " << total_successful_subscriptions << endl;
+        cout << "Total Unsuccessful Subscription: " << total_unsuccessful_subscriptions << endl;
+        cout << "Total Successful Subscription from Subscription Buffer: " << total_subscription_from_buffer << endl;
+        cout << "Total Unsubscription: " << total_unsubscriptions << endl;
+        cout << "Total Successful Insertation into the Subscription Buffer: " << total_buffer_successful_insertation << endl;
+        cout << "Total Unsuccessful Insertation into the Subscription Buffer: " << total_buffer_unsuccessful_insertation << endl;
       }
     };
     
@@ -543,7 +569,7 @@ public:
         }
 
         if (configs.contains("prefetcher_subscription_table_way")) {
-          prefetcher_set.set_subscription_table_way(stoi(configs["prefetcher_subscription_table_way"]));
+          prefetcher_set.set_subscription_table_ways(stoi(configs["prefetcher_subscription_table_way"]));
         }
 
 
@@ -1333,6 +1359,7 @@ public:
       }
       ofs.close();
       memory_addresses.close();
+      prefetcher_set.print_stats();
     }
 
     long page_allocator(long addr, int coreid) {
