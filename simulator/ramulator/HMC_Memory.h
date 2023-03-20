@@ -273,6 +273,10 @@ public:
           if(virtualized_sets[get_set(addr)] > 0) {
             virtualized_sets[get_set(addr)]--;
           }
+          if(free_sets.count(get_set(addr)) == 0){
+            // cout << "Reinsert set " << get_set(addr) << " as it now has space" << endl;
+            free_sets.insert(get_set(addr)); // By unsubscribing we make it free
+          }
         }
       }
       void immediate_subscribe_address(long addr, int vault) {
@@ -292,6 +296,7 @@ public:
         address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
         virtualized_sets[get_set(addr)]++;
         if(virtualized_sets[get_set(addr)] >= subscription_table_ways) {
+          // cout << "Set " << get_set(addr) << " is full, we now remove it from the free set" << endl;
           free_sets.erase(get_set(addr)); // If after insertion the subscription set reaches the maximum way, we remove it from the free_set list
         }
         total_successful_subscriptions++;
@@ -311,7 +316,6 @@ public:
             submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
         total_unsubscriptions++;
-        free_sets.insert(get_set(addr)); // Regardless whether the set was previously free, by unsubscribing we make it free
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
@@ -330,10 +334,13 @@ public:
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
         // New algorithm, should run faster now that we only check the "empty" sets which are likely to be fewer
-        if(subscription_buffer_used != 0) {
+        if(subscription_buffer_used > 0) {
           for(auto it = free_sets.begin(); it != free_sets.end();) {
             size_t set = *it;
             it++; // Iterate here because we may remove the current element as we proceed with the below logic
+            // if(!subscription_buffer[set].empty()) {
+            //   cout << "The current set is " << set << " and it appears to have " << virtualized_sets[set] << " lines and its buffer is not empty" << !subscription_buffer[set].empty() << endl;
+            // }
             assert(virtualized_sets[set] < subscription_table_ways); // Just check - if the set is free, it should have less element than the most
             while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
               SubscriptionTask current_task = subscription_buffer[set].front();
@@ -366,12 +373,12 @@ public:
                 // if the subscription is full when the request arrives, we try to free up a subscription table entry
                 // cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
                 long victim_addr = find_victim_for_unsubscription(i.addr);
-                // cout << "We pick " << i.addr << " to evict from the table." << endl;
+                cout << "We pick " << victim_addr << " to evict from the table." << endl;
                 unsubscribe_address(victim_addr);
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.addr)) {
-                  // cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
+                  cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
                   subscription_buffer[get_set(i.addr)].push_back(i);
                   subscription_buffer_used++;
                   subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
@@ -393,6 +400,7 @@ public:
         list<SubscriptionTask> new_pending_unsubscription;
         for (auto& i : pending_unsubscription) {
           if(i.hops == 0){
+            cout << "Actually unsubscribing address " << i.addr << endl;
             immediate_unsubscribe_address(i.addr);
             continue;
           } // Safety Check
