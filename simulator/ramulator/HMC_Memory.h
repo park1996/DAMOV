@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <array>
 #include <climits>
 #include <bitset>
@@ -197,9 +198,9 @@ public:
       Memory<HMC, Controller>* mem_ptr;
       // TODO: Decrease the associativity of this table
       // TODO (To be confirmed): Split this table by each core
-      map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
+      unordered_map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
       vector<list<long>> address_access_history;
-      map<long, typename list<long>::iterator> address_access_history_map;
+      unordered_map<long, typename list<long>::iterator> address_access_history_map;
       struct SubscriptionTask {
         long addr;
         int req_vault;
@@ -210,7 +211,8 @@ public:
       list<SubscriptionTask> pending_subscription; // Tasks in pending_subscription and pending_unsubscription are being communicated via the network
       list<SubscriptionTask> pending_unsubscription;
       vector<list<SubscriptionTask>> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
-      map<long, typename list<SubscriptionTask>::iterator> subscription_buffer_map; // To ensure that we don't put two addresses in the same buffer twice
+      unordered_map<long, typename list<SubscriptionTask>::iterator> subscription_buffer_map; // To ensure that we don't put two addresses in the same buffer twice
+      unordered_set<size_t> free_sets; // To speedup the "buffer", we use a set to track free sets
     public:
       SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):mem_ptr(mem_ptr) {
         array<TableType, COUNTER_TABLE_SIZE> zero_array;
@@ -252,6 +254,10 @@ public:
         virtualized_sets.assign(subscription_table_sets, 0);
         address_access_history.assign(subscription_table_sets, list<long>());
         subscription_buffer.assign(subscription_table_sets, list<SubscriptionTask>());
+        // At the initialization, all sets are free so we put them in
+        for(size_t i = 0; i < subscription_table_sets; i++) {
+          free_sets.insert(i);
+        }
       }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
@@ -285,6 +291,9 @@ public:
         address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
         address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
         virtualized_sets[get_set(addr)]++;
+        if(virtualized_sets[get_set(addr)] >= subscription_table_ways) {
+          free_sets.erase(get_set(addr)); // If after insertion the subscription set reaches the maximum way, we remove it from the free_set list
+        }
         total_successful_subscriptions++;
       }
       void unsubscribe_address(long addr) {
@@ -302,6 +311,7 @@ public:
             submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
         total_unsubscriptions++;
+        free_sets.insert(get_set(addr)); // Regardless whether the set was previously free, by unsubscribing we make it free
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
@@ -319,11 +329,12 @@ public:
       void submit_unsubscription(long addr, int mapped_vault, int hops) {pending_unsubscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
-        // This algorithm works very slow when set is anything reasonably large (say 65536 sets).
-        // I am temporarily adding a workaround by disabling this logic when subscription_buffer_size is set to 0 (it is not needed in that case anyways)
-        // I will remove this check if/when we come up with a better idea
-        if(subscription_buffer_size != 0) {
-          for(int set = 0; set < subscription_table_sets; set++) {
+        // New algorithm, should run faster now that we only check the "empty" sets which are likely to be fewer
+        if(subscription_buffer_used != 0) {
+          for(auto it = free_sets.begin(); it != free_sets.end();) {
+            size_t set = *it;
+            it++; // Iterate here because we may remove the current element as we proceed with the below logic
+            assert(virtualized_sets[set] < subscription_table_ways); // Just check - if the set is free, it should have less element than the most
             while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
               SubscriptionTask current_task = subscription_buffer[set].front();
               // cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
@@ -360,7 +371,7 @@ public:
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.addr)) {
-                  cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
+                  // cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
                   subscription_buffer[get_set(i.addr)].push_back(i);
                   subscription_buffer_used++;
                   subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
