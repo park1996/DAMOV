@@ -288,7 +288,7 @@ public:
         total_successful_subscriptions++;
       }
       void unsubscribe_address(long addr) {
-        cout << "Immediately attempting to unsubscribe address " << addr << endl;
+        // cout << "Immediately attempting to unsubscribe address " << addr << endl;
         if(address_translation_table.count(addr) == 0) {
             return; // If there is no local record, do nothing.
         }
@@ -319,14 +319,19 @@ public:
       void submit_unsubscription(long addr, int mapped_vault, int hops) {pending_unsubscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
-        for(int set = 0; set < subscription_table_sets; set++) {
-          while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
-            SubscriptionTask current_task = subscription_buffer[set].front();
-            // cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
-            immediate_subscribe_address(current_task.addr, current_task.req_vault);
-            subscription_buffer[set].pop_front();
-            subscription_buffer_used--;
-            total_subscription_from_buffer++;
+        // This algorithm works very slow when set is anything reasonably large (say 65536 sets).
+        // I am temporarily adding a workaround by disabling this logic when subscription_buffer_size is set to 0 (it is not needed in that case anyways)
+        // I will remove this check if/when we come up with a better idea
+        if(subscription_buffer_size != 0) {
+          for(int set = 0; set < subscription_table_sets; set++) {
+            while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
+              SubscriptionTask current_task = subscription_buffer[set].front();
+              // cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
+              immediate_subscribe_address(current_task.addr, current_task.req_vault);
+              subscription_buffer[set].pop_front();
+              subscription_buffer_used--;
+              total_subscription_from_buffer++;
+            }
           }
         }
 
