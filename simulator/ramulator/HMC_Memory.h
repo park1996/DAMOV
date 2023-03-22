@@ -11,6 +11,7 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <array>
 #include <climits>
 #include <bitset>
@@ -177,12 +178,25 @@ public:
       size_t subscription_table_size = SIZE_MAX;
       size_t subscription_buffer_size = SIZE_MAX; // TODO: Actually find a reasonable buffer size
       size_t subscription_buffer_used = 0;
-      size_t address_access_history_size = SIZE_MAX;
-      size_t address_access_history_used = 0;
+      size_t address_access_history_size = SIZE_MAX; // Use for LRU
+      size_t address_access_history_used = 0; // Used for LRU
+      size_t count_priority_queue_size = SIZE_MAX;
+      size_t count_priority_queue_used = 0;
       static const int COUNTER_BITS = 8;
       static const int TAG_BITS = 24;
       size_t subscription_table_ways = subscription_table_size;
       size_t subscription_table_sets = subscription_table_size / subscription_table_ways;
+      enum SubscriptionPrefetcherReplacementPolicy {
+        LRU,
+        LFU,
+        DirtyLFU,
+      } subscription_table_replacement_policy = SubscriptionPrefetcherReplacementPolicy::LRU; // We default it to LRU
+
+      std::map<string, SubscriptionPrefetcherReplacementPolicy> name_to_prefetcher_rp = {
+        {"LRU", SubscriptionPrefetcherReplacementPolicy::LRU},
+        {"LFU", SubscriptionPrefetcherReplacementPolicy::LFU},
+        {"DirtyLFU", SubscriptionPrefetcherReplacementPolicy::DirtyLFU},
+      };
       // Variables used for statistic purposes
       long total_memory_accesses = 0;
       long total_successful_subscriptions = 0;
@@ -191,16 +205,29 @@ public:
       long total_buffer_successful_insertation = 0;
       long total_buffer_unsuccessful_insertation = 0;
       long total_subscription_from_buffer = 0;
+      long total_unsubscriptions_as_a_result_of_replacement = 0;
       vector<size_t> virtualized_sets;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
       vector<array<TableType, COUNTER_TABLE_SIZE>> count_tables;
       Memory<HMC, Controller>* mem_ptr;
-      // TODO: Decrease the associativity of this table
       // TODO (To be confirmed): Split this table by each core
       unordered_map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
+      // Used for LRU
       vector<list<long>> address_access_history;
       unordered_map<long, typename list<long>::iterator> address_access_history_map;
+      // Used for LFU
+      struct LFUPriorityQueueItem {
+        long addr;
+        TableType count;
+        LFUPriorityQueueItem(){}
+        LFUPriorityQueueItem(long addr, TableType count):addr(addr),count(count){}
+        bool operator< (const LFUPriorityQueueItem& lfupqi)const {
+          return this -> count < lfupqi.count;
+        }
+      };
+      vector<multiset<LFUPriorityQueueItem>> count_priority_queue;
+      unordered_map<long, typename multiset<LFUPriorityQueueItem>::iterator> count_priority_queue_map;
       struct SubscriptionTask {
         long addr;
         int req_vault;
@@ -223,7 +250,23 @@ public:
       size_t get_set(long addr) const {return addr % subscription_table_sets;}
       bool subscription_table_is_free(long addr) const {return virtualized_sets[get_set(addr)] < subscription_table_ways;}
       bool subscription_buffer_is_free(long addr) const {return subscription_buffer_used < subscription_buffer_size;}
-      long find_victim_for_unsubscription(long addr) const {return address_access_history[get_set(addr)].back();}
+      long find_victim_for_unsubscription(long addr) const {
+        if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+          return address_access_history[get_set(addr)].back(); // LRU Logic
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+          // if(count_priority_queue[get_set(addr)].begin() -> count > 0 || count_priority_queue[get_set(addr)].end() -> count > 0){
+          //   cout << "The least used address is " << count_priority_queue[get_set(addr)].begin() -> addr << " with count " << count_priority_queue[get_set(addr)].begin() -> count << endl;
+          //   for(auto& i: count_priority_queue[get_set(addr)]) {
+          //     cout << i.addr << " " << i.count << endl;
+          //   }
+          //   cout << "The most used address is" << prev(count_priority_queue[get_set(addr)].end()) -> addr << " with count " << prev(count_priority_queue[get_set(addr)].end()) -> count << endl;
+          // }
+          return count_priority_queue[get_set(addr)].begin() -> addr; // LFU Logic
+        }
+        // If our replacement policy is unknown, we fail deliberately
+        assert(false);
+        return 0;
+      }
       void set_prefetch_hops_threshold(int threshold) {
         prefetch_hops_threshold = threshold;
         cout << "Prefetcher hops threshold: " << prefetch_hops_threshold << endl;
@@ -244,6 +287,10 @@ public:
       void set_subscription_buffer_size(int size) {
         subscription_buffer_size = size;
       }
+      void set_subscription_table_replacement_policy(string policy) {
+        subscription_table_replacement_policy = name_to_prefetcher_rp[policy];
+        cout << "Subscription table replacement policy is: " << policy << endl;
+      }
       void initialize_sets(){
         assert(subscription_table_size % subscription_table_ways == 0);
         subscription_table_sets = subscription_table_size / subscription_table_ways;
@@ -252,7 +299,14 @@ public:
         cout << "Subscription Table Ways: " << subscription_table_ways << endl;
         cout << "Subscription Table Sets: " << subscription_table_sets << endl; 
         virtualized_sets.assign(subscription_table_sets, 0);
-        address_access_history.assign(subscription_table_sets, list<long>());
+        if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+          address_access_history.assign(subscription_table_sets, list<long>()); // Used for LRU
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+          count_priority_queue.assign(subscription_table_sets, multiset<LFUPriorityQueueItem>()); // Used for LFU
+        } else {
+          cout << "Unknown replacement policy!" << endl;
+          assert(false); // We fail early if the policy is not known.
+        }
         subscription_buffer.assign(subscription_table_sets, list<SubscriptionTask>());
         // At the initialization, all sets are free so we put them in
         for(size_t i = 0; i < subscription_table_sets; i++) {
@@ -264,10 +318,25 @@ public:
         return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
       }
       void immediate_unsubscribe_address(long addr) { // unless otherwise specifiedd, "addr" in arguments below are preprocessed addresses
-        if(address_access_history_map.count(addr)){
-          address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
-          address_access_history_map.erase(addr);
-        }
+        if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+          // ----- LRU Logic -----
+          if(address_access_history_map.count(addr)){
+            address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
+            address_access_history_map.erase(addr);
+            address_access_history_used--;
+          }
+          // ----- LRU Logic End -----
+        } else if (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
+          // We have a "Dirty LFU" logic that simply don't reset the count to 0 on unsubscription and we will use it to see if that has better performance
+          // Because most times a line will just have 1-3 counts before being evicted
+          // ----- LFU Logic -----
+          if(count_priority_queue_map.count(addr)) {
+            count_priority_queue[get_set(addr)].erase(count_priority_queue_map[addr]);
+            count_priority_queue_map.erase(addr);
+            count_priority_queue_used--;
+          }
+          // ----- LFU Logic End -----
+        } // If it's dirty LFU, we do nothing since it we want to keep the count even if it's unsubscribed
         if(address_translation_table.count(addr)){
           address_translation_table.erase(addr);
           if(virtualized_sets[get_set(addr)] > 0) {
@@ -277,22 +346,41 @@ public:
             // cout << "Reinsert set " << get_set(addr) << " as it now has space" << endl;
             free_sets.insert(get_set(addr)); // By unsubscribing we make it free
           }
+          total_unsubscriptions++;
         }
       }
       void immediate_subscribe_address(long addr, int vault) {
-        // cout << "Actually ubscribing address Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
-        //     << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
-        //     << " to Vault " << vault << endl;
-        immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
-        while(address_access_history_used >= address_access_history_size) {
-          long last = address_access_history[get_set(addr)].back();
-          address_access_history[get_set(addr)].pop_back();
-          address_access_history_map.erase(last);
-          address_access_history_used--;
+        if(address_translation_table.count(addr)){
+          immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
+          total_unsubscriptions_as_a_result_of_replacement++;
         }
-        address_access_history[get_set(addr)].push_front(addr);
-        address_access_history_used++;
-        address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
+        if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+          // ----- LRU Logic -----
+          while(address_access_history_used >= address_access_history_size) {
+            long last = address_access_history[get_set(addr)].back();
+            address_access_history[get_set(addr)].pop_back();
+            address_access_history_map.erase(last);
+            address_access_history_used--;
+          }
+          address_access_history[get_set(addr)].push_front(addr);
+          address_access_history_used++;
+          address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
+          // ----- LRU Logic end -----
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU && count_priority_queue_map.count(addr) == 0)) {
+          // ----- LFU Logic -----
+          // At first, we try to remove the least count entry if the priority queue is full
+          while(count_priority_queue_used >= count_priority_queue_size) {
+            auto it = count_priority_queue[get_set(addr)].begin();
+            long top_addr = it -> addr;
+            count_priority_queue[get_set(addr)].erase(it);
+            count_priority_queue_map.erase(top_addr);
+            count_priority_queue_used--;
+          }
+
+          count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(LFUPriorityQueueItem(addr, 0));
+          count_priority_queue_used++;
+          // ----- LFU Logic end -----
+        }
         address_translation_table[addr] = vault; // Subscribe the remote vault to local vault
         virtualized_sets[get_set(addr)]++;
         if(virtualized_sets[get_set(addr)] >= subscription_table_ways) {
@@ -315,13 +403,9 @@ public:
         if(address_translation_table.count(victim_addr)) {
             submit_unsubscription(victim_addr, address_translation_table[victim_addr], hops);
         }
-        total_unsubscriptions++;
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
-        // cout << "Queuing address Vault " << addr_vec[int(HMC::Level::Vault)] << " BankGroup " << addr_vec[int(HMC::Level::BankGroup)]
-        //   << " Bank " << addr_vec[int(HMC::Level::Bank)] << " Row " << addr_vec[int(HMC::Level::Row)] << " Column " << addr_vec[int(HMC::Level::Column)]
-        //   << " From Vault " << val_vault << " to Vault for subscribe " << req_vault << " it will take effect in " << hops << " cycles" << endl;
         vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
         vector<int> victim_vec(addr_vec);
         victim_vec[int(HMC::Level::Vault)] = req_vault; // We are locating the page in the local vault's same row & column for swapping with the remote vault
@@ -338,9 +422,9 @@ public:
           for(auto it = free_sets.begin(); it != free_sets.end();) {
             size_t set = *it;
             it++; // Iterate here because we may remove the current element as we proceed with the below logic
-            // if(!subscription_buffer[set].empty()) {
-            //   cout << "The current set is " << set << " and it appears to have " << virtualized_sets[set] << " lines and its buffer is not empty" << !subscription_buffer[set].empty() << endl;
-            // }
+            if(!subscription_buffer[set].empty()) {
+              // cout << "The current set is " << set << " and it appears to have " << virtualized_sets[set] << " lines and its buffer is not empty" << endl;
+            }
             assert(virtualized_sets[set] < subscription_table_ways); // Just check - if the set is free, it should have less element than the most
             while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
               SubscriptionTask current_task = subscription_buffer[set].front();
@@ -373,12 +457,12 @@ public:
                 // if the subscription is full when the request arrives, we try to free up a subscription table entry
                 // cout << "Subscription table is full. Trying to unsubscribe to make space..." << endl;
                 long victim_addr = find_victim_for_unsubscription(i.addr);
-                cout << "We pick " << victim_addr << " to evict from the table." << endl;
+                // cout << "We pick " << victim_addr << " to evict from the table." << endl;
                 unsubscribe_address(victim_addr);
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.addr)) {
-                  cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
+                  // cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
                   subscription_buffer[get_set(i.addr)].push_back(i);
                   subscription_buffer_used++;
                   subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
@@ -400,7 +484,7 @@ public:
         list<SubscriptionTask> new_pending_unsubscription;
         for (auto& i : pending_unsubscription) {
           if(i.hops == 0){
-            cout << "Actually unsubscribing address " << i.addr << endl;
+            // cout << "Actually unsubscribing address " << i.addr << endl;
             immediate_unsubscribe_address(i.addr);
             continue;
           } // Safety Check
@@ -412,14 +496,32 @@ public:
       }
       int find_vault(long addr, int original_vault) {
         if(address_translation_table.count(addr)) {
-          if(address_access_history_map.count(addr)) {
-            address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
-            address_access_history_map.erase(addr);
-            address_access_history_used--;
+          if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+            // ----- LRU Logic -----
+            if(address_access_history_map.count(addr)) {
+              address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
+              address_access_history_map.erase(addr);
+              address_access_history_used--;
+            }
+            address_access_history[get_set(addr)].push_front(addr);
+            address_access_history_used++;
+            address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
+            // ----- LRU Logic End -----
+          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+            // ----- LFU Logic -----
+            LFUPriorityQueueItem item = LFUPriorityQueueItem(addr, 0);
+            if(count_priority_queue_map.count(addr)) {
+              auto it = count_priority_queue_map[addr];
+              item = *it;
+              item.count++;
+              count_priority_queue[get_set(addr)].erase(it);
+              count_priority_queue_map.erase(addr);
+              count_priority_queue_used--;
+            }
+            count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(item);
+            count_priority_queue_used++;
+            // ----- LFU Logic End -----
           }
-          address_access_history[get_set(addr)].push_front(addr);
-          address_access_history_used++;
-          address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
           return address_translation_table[addr];
         }
         return original_vault;
@@ -480,6 +582,7 @@ public:
         cout << "Total Unsuccessful Subscription: " << total_unsuccessful_subscriptions << endl;
         cout << "Total Successful Subscription from Subscription Buffer: " << total_subscription_from_buffer << endl;
         cout << "Total Unsubscription: " << total_unsubscriptions << endl;
+        cout << "Total Unsubscription as a result of replacing existing entry: " << total_unsubscriptions_as_a_result_of_replacement << endl;
         cout << "Total Successful Insertation into the Subscription Buffer: " << total_buffer_successful_insertation << endl;
         cout << "Total Unsuccessful Insertation into the Subscription Buffer: " << total_buffer_unsuccessful_insertation << endl;
       }
@@ -596,9 +699,12 @@ public:
           prefetcher_set.set_subscription_table_ways(stoi(configs["prefetcher_subscription_table_way"]));
         }
 
-
         if (configs.contains("prefetcher_subscription_buffer_size")) {
           prefetcher_set.set_subscription_buffer_size(stoi(configs["prefetcher_subscription_buffer_size"]));
+        }
+
+        if (configs.contains("prefetcher_table_replacement_policy")) {
+          prefetcher_set.set_subscription_table_replacement_policy(configs["prefetcher_table_replacement_policy"]);
         }
         prefetcher_set.initialize_sets();
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
