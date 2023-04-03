@@ -25,3 +25,4 @@ simulator/ramulator-configs/prefetcher*/
 simulator/execution_statuses*
 simulator-communication-info-patch/
 simulator-communication-info-patch/*
+simulator/output*
