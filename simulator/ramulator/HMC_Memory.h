@@ -199,6 +199,7 @@ public:
       };
       // Variables used for statistic purposes
       long total_memory_accesses = 0;
+      long total_submitted_subscriptions = 0;
       long total_successful_subscriptions = 0;
       long total_unsuccessful_subscriptions = 0;
       long total_unsubscriptions = 0;
@@ -206,6 +207,8 @@ public:
       long total_buffer_unsuccessful_insertation = 0;
       long total_subscription_from_buffer = 0;
       long total_unsubscriptions_as_a_result_of_replacement = 0;
+      long total_insertion_into_counter_table = 0;
+      long total_eviction_from_counter_table = 0;
       vector<size_t> virtualized_sets;
       TableType prefetch_hops_threshold = 5;
       TableType prefetch_count_threshold = 1;
@@ -237,7 +240,7 @@ public:
       };
       list<SubscriptionTask> pending_subscription; // Tasks in pending_subscription and pending_unsubscription are being communicated via the network
       list<SubscriptionTask> pending_unsubscription;
-      vector<list<SubscriptionTask>> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
+      list<SubscriptionTask> subscription_buffer; // To be used when the subscription table is "full". Tasks in this queue is actually at its destination
       unordered_map<long, typename list<SubscriptionTask>::iterator> subscription_buffer_map; // To ensure that we don't put two addresses in the same buffer twice
       unordered_set<size_t> free_sets; // To speedup the "buffer", we use a set to track free sets
     public:
@@ -249,7 +252,7 @@ public:
       int get_counter_table_size() const {return COUNTER_TABLE_SIZE;}
       size_t get_set(long addr) const {return addr % subscription_table_sets;}
       bool subscription_table_is_free(long addr) const {return virtualized_sets[get_set(addr)] < subscription_table_ways;}
-      bool subscription_buffer_is_free(long addr) const {return subscription_buffer_used < subscription_buffer_size;}
+      bool subscription_buffer_is_free(long addr) const {return subscription_buffer.size() < subscription_buffer_size;}
       long find_victim_for_unsubscription(long addr) const {
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
           return address_access_history[get_set(addr)].back(); // LRU Logic
@@ -307,11 +310,11 @@ public:
           cout << "Unknown replacement policy!" << endl;
           assert(false); // We fail early if the policy is not known.
         }
-        subscription_buffer.assign(subscription_table_sets, list<SubscriptionTask>());
+        // subscription_buffer.assign(subscription_table_sets, list<SubscriptionTask>());
         // At the initialization, all sets are free so we put them in
-        for(size_t i = 0; i < subscription_table_sets; i++) {
-          free_sets.insert(i);
-        }
+        // for(size_t i = 0; i < subscription_table_sets; i++) {
+        //   free_sets.insert(i);
+        // }
       }
       bool check_prefetch(TableType hops, TableType count) const {
         // TODO: Implment a good prefetch policy
@@ -350,6 +353,8 @@ public:
         }
       }
       void immediate_subscribe_address(long addr, int vault) {
+        if(vault >= 32)
+          cout << "subscribing " << addr << " to " << vault << endl;
         if(address_translation_table.count(addr)){
           immediate_unsubscribe_address(addr); // Unscribe first to make sure we're not having any issues
           total_unsubscriptions_as_a_result_of_replacement++;
@@ -417,24 +422,20 @@ public:
       void submit_unsubscription(long addr, int mapped_vault, int hops) {pending_unsubscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
-        // New algorithm, should run faster now that we only check the "empty" sets which are likely to be fewer
-        if(subscription_buffer_used > 0) {
-          for(auto it = free_sets.begin(); it != free_sets.end();) {
-            size_t set = *it;
-            it++; // Iterate here because we may remove the current element as we proceed with the below logic
-            if(!subscription_buffer[set].empty()) {
-              // cout << "The current set is " << set << " and it appears to have " << virtualized_sets[set] << " lines and its buffer is not empty" << endl;
-            }
-            assert(virtualized_sets[set] < subscription_table_ways); // Just check - if the set is free, it should have less element than the most
-            while(virtualized_sets[set] < subscription_table_ways && !subscription_buffer[set].empty()){
-              SubscriptionTask current_task = subscription_buffer[set].front();
-              // cout << "Trying to insert " << current_task.addr << " into subscription table since we have space now." << endl;
-              immediate_subscribe_address(current_task.addr, current_task.req_vault);
-              subscription_buffer[set].pop_front();
-              subscription_buffer_used--;
+        if(subscription_buffer.size() > 0) {
+          list<SubscriptionTask> new_subscription_buffer;
+          for(auto& i:subscription_buffer){
+            if(subscription_buffer_is_free(i.addr)){
+              // cout << "Trying to insert " << i.addr << " into subscription table since we have space now." << endl;
+              immediate_subscribe_address(i.addr, i.req_vault);
+              subscription_buffer_map.erase(i.addr);
               total_subscription_from_buffer++;
+            } else {
+              new_subscription_buffer.push_back(i);
+              subscription_buffer_map[i.addr] = prev(new_subscription_buffer.end());
             }
           }
+          subscription_buffer = new_subscription_buffer;
         }
 
         // Then, we process the transfer of subscription requests in the network
@@ -463,9 +464,8 @@ public:
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.addr)) {
                   // cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
-                  subscription_buffer[get_set(i.addr)].push_back(i);
-                  subscription_buffer_used++;
-                  subscription_buffer_map[i.addr] = prev(subscription_buffer[get_set(i.addr)].end());
+                  subscription_buffer.push_back(i);
+                  subscription_buffer_map[i.addr] = prev(subscription_buffer.end());
                   total_buffer_successful_insertation++;
                 } else {
                   total_buffer_unsuccessful_insertation++;
@@ -554,6 +554,7 @@ public:
         TableType count;
         TableType old_tag = (table_entry >> (COUNTER_BITS));
         if(old_tag != tag) {
+          total_eviction_from_counter_table++;
           count = 0; // If tag does not match, the address is not the same and we start from the scratch
           // cout << "A prefetch table replacement happening at index: " << table_index << " and vault " << req.addr_vec[int(HMC::Level::Vault)] <<
           //     " The old tag is " << old_tag << " the new tag is " << tag << endl;
@@ -563,6 +564,7 @@ public:
           count = (table_entry << TAG_BITS >>  TAG_BITS);
           count++;
         }
+        total_insertion_into_counter_table++;
         if(count >= ((TableType)1 << COUNTER_BITS)) {
           count = ((TableType)1 << COUNTER_BITS) - 1;
         }
@@ -585,6 +587,7 @@ public:
         cout << "Total Unsubscription as a result of replacing existing entry: " << total_unsubscriptions_as_a_result_of_replacement << endl;
         cout << "Total Successful Insertation into the Subscription Buffer: " << total_buffer_successful_insertation << endl;
         cout << "Total Unsuccessful Insertation into the Subscription Buffer: " << total_buffer_unsuccessful_insertation << endl;
+        cout << "We have inserted " << total_insertion_into_counter_table << " into the counter table " << " and evicted " << total_eviction_from_counter_table << " from it." << endl;
       }
     };
     
@@ -691,12 +694,12 @@ public:
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
-        if (configs.contains("prefetcher_subscription_table_size")) {
-          prefetcher_set.set_subscription_table_size(stoi(configs["prefetcher_subscription_table_size"]));
+        if (configs.contains("prefetcher_subscription_to_table_size")) {
+          prefetcher_set.set_subscription_table_size(stoi(configs["prefetcher_subscription_to_table_size"]));
         }
 
-        if (configs.contains("prefetcher_subscription_table_way")) {
-          prefetcher_set.set_subscription_table_ways(stoi(configs["prefetcher_subscription_table_way"]));
+        if (configs.contains("prefetcher_subscription_to_table_way")) {
+          prefetcher_set.set_subscription_table_ways(stoi(configs["prefetcher_subscription_to_table_way"]));
         }
 
         if (configs.contains("prefetcher_subscription_buffer_size")) {
