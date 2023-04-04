@@ -361,19 +361,37 @@ public:
         }
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
           // ----- LRU Logic -----
+          if(address_access_history_map.count(addr)) {
+            address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
+            address_access_history_map.erase(addr);
+            address_access_history_used--;
+          }
+          // Then if the address access history table is still larger than maximum minus one, we make some space
           while(address_access_history_used >= address_access_history_size) {
             long last = address_access_history[get_set(addr)].back();
             address_access_history[get_set(addr)].pop_back();
             address_access_history_map.erase(last);
             address_access_history_used--;
           }
+          // Last, we insert the new address to the front of the history (i.e. most recently accessed)
           address_access_history[get_set(addr)].push_front(addr);
           address_access_history_used++;
           address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
           // ----- LRU Logic end -----
         } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU && count_priority_queue_map.count(addr) == 0)) {
           // ----- LFU Logic -----
-          // At first, we try to remove the least count entry if the priority queue is full
+          // First we set the count to 0, in case we are handling new entry
+          LFUPriorityQueueItem item = LFUPriorityQueueItem(addr, 0);
+          // Then, we try to find the existing entry with same address, take it's data to item, increase the count, then remove it from the table pending reinsertion
+          if(count_priority_queue_map.count(addr)) {
+            auto it = count_priority_queue_map[addr];
+            item = *it;
+            item.count++;
+            count_priority_queue[get_set(addr)].erase(it);
+            count_priority_queue_map.erase(addr);
+            count_priority_queue_used--;
+          }
+          // Also, we check if the table has free space, and try make one if it doesn't
           while(count_priority_queue_used >= count_priority_queue_size) {
             auto it = count_priority_queue[get_set(addr)].begin();
             long top_addr = it -> addr;
@@ -381,8 +399,8 @@ public:
             count_priority_queue_map.erase(top_addr);
             count_priority_queue_used--;
           }
-
-          count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(LFUPriorityQueueItem(addr, 0));
+          // Finally, we (re)insert the entry into the table
+          count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(item);
           count_priority_queue_used++;
           // ----- LFU Logic end -----
         }
@@ -418,7 +436,10 @@ public:
         submit_subscription(addr, req_vault, hops); // Submit to wait for given number of cycles
         submit_subscription(victim_addr, val_vault, hops);
       }
-      void submit_subscription(long addr, int mapped_vault, int hops) {pending_subscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
+      void submit_subscription(long addr, int mapped_vault, int hops) {
+        total_submitted_subscriptions++;
+        pending_subscription.push_back(SubscriptionTask(addr, mapped_vault, hops));
+      }
       void submit_unsubscription(long addr, int mapped_vault, int hops) {pending_unsubscription.push_back(SubscriptionTask(addr, mapped_vault, hops));}
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
@@ -496,32 +517,6 @@ public:
       }
       int find_vault(long addr, int original_vault) {
         if(address_translation_table.count(addr)) {
-          if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-            // ----- LRU Logic -----
-            if(address_access_history_map.count(addr)) {
-              address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
-              address_access_history_map.erase(addr);
-              address_access_history_used--;
-            }
-            address_access_history[get_set(addr)].push_front(addr);
-            address_access_history_used++;
-            address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
-            // ----- LRU Logic End -----
-          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
-            // ----- LFU Logic -----
-            LFUPriorityQueueItem item = LFUPriorityQueueItem(addr, 0);
-            if(count_priority_queue_map.count(addr)) {
-              auto it = count_priority_queue_map[addr];
-              item = *it;
-              item.count++;
-              count_priority_queue[get_set(addr)].erase(it);
-              count_priority_queue_map.erase(addr);
-              count_priority_queue_used--;
-            }
-            count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(item);
-            count_priority_queue_used++;
-            // ----- LFU Logic End -----
-          }
           return address_translation_table[addr];
         }
         return original_vault;
@@ -533,6 +528,51 @@ public:
         long addr = req.addr;
         pre_process_addr(addr);
         if(address_translation_table.count(addr)) {
+          if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+            // ----- LRU Logic -----
+            if(address_access_history_map.count(addr)) {
+              address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
+              address_access_history_map.erase(addr);
+              address_access_history_used--;
+            }
+            // Then if the address access history table is still larger than maximum minus one, we make some space
+            while(address_access_history_used >= address_access_history_size) {
+              long last = address_access_history[get_set(addr)].back();
+              address_access_history[get_set(addr)].pop_back();
+              address_access_history_map.erase(last);
+              address_access_history_used--;
+            }
+            // Last, we insert the new address to the front of the history (i.e. most recently accessed)
+            address_access_history[get_set(addr)].push_front(addr);
+            address_access_history_used++;
+            address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
+            // ----- LRU Logic End -----
+          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+            // ----- LFU Logic -----
+            // First we set the count to 0, in case we are handling new entry
+            LFUPriorityQueueItem item = LFUPriorityQueueItem(addr, 0);
+            // Then, we try to find the existing entry with same address, take it's data to item, increase the count, then remove it from the table pending reinsertion
+            if(count_priority_queue_map.count(addr)) {
+              auto it = count_priority_queue_map[addr];
+              item = *it;
+              item.count++;
+              count_priority_queue[get_set(addr)].erase(it);
+              count_priority_queue_map.erase(addr);
+              count_priority_queue_used--;
+            }
+            // Also, we check if the table has free space, and try make one if it doesn't
+            while(count_priority_queue_used >= count_priority_queue_size) {
+              auto it = count_priority_queue[get_set(addr)].begin();
+              long top_addr = it -> addr;
+              count_priority_queue[get_set(addr)].erase(it);
+              count_priority_queue_map.erase(top_addr);
+              count_priority_queue_used--;
+            }
+            // Finally, we (re)insert the entry into the table
+            count_priority_queue_map[addr] = count_priority_queue[get_set(addr)].insert(item);
+            count_priority_queue_used++;
+            // ----- LFU Logic End -----
+          }
           req.addr_vec[int(HMC::Level::Vault)] = address_translation_table[addr];
         }
       }
@@ -580,6 +620,7 @@ public:
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
         cout << "Total memory accesses: " << total_memory_accesses << endl;
+        cout << "Total submitted subscriptions: " << total_submitted_subscriptions << endl;
         cout << "Total Successful Subscription: " << total_successful_subscriptions << endl;
         cout << "Total Unsuccessful Subscription: " << total_unsuccessful_subscriptions << endl;
         cout << "Total Successful Subscription from Subscription Buffer: " << total_subscription_from_buffer << endl;
@@ -709,7 +750,9 @@ public:
         if (configs.contains("prefetcher_table_replacement_policy")) {
           prefetcher_set.set_subscription_table_replacement_policy(configs["prefetcher_table_replacement_policy"]);
         }
-        prefetcher_set.initialize_sets();
+        if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+          prefetcher_set.initialize_sets();
+        }
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
         cout << "maxblock_entry.flit_num_bits: " << spec->maxblock_entry.flit_num_bits << " tx_bits: " << tx_bits << " max_block_col_bits: " << max_block_col_bits << endl;
 
@@ -1492,7 +1535,9 @@ public:
       }
       ofs.close();
       memory_addresses.close();
-      prefetcher_set.print_stats();
+      if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+        prefetcher_set.print_stats();
+      }
     }
 
     long page_allocator(long addr, int coreid) {
