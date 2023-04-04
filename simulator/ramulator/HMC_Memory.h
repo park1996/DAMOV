@@ -446,7 +446,7 @@ public:
         if(subscription_buffer.size() > 0) {
           list<SubscriptionTask> new_subscription_buffer;
           for(auto& i:subscription_buffer){
-            if(subscription_buffer_is_free(i.addr)){
+            if(subscription_table_is_free(i.addr)){
               // cout << "Trying to insert " << i.addr << " into subscription table since we have space now." << endl;
               immediate_subscribe_address(i.addr, i.req_vault);
               subscription_buffer_map.erase(i.addr);
