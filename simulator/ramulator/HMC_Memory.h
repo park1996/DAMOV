@@ -267,6 +267,9 @@ public:
           if(virtualized_from_table_sets[get_from_table_set(addr)] > 0) {
             virtualized_from_table_sets[get_from_table_set(addr)]--;
           }
+          if(virtualized_to_table_sets[get_to_table_set(addr)] > 0) {
+            virtualized_to_table_sets[get_to_table_set(addr)]--;
+          }
         }
         bool has(long addr) const{return address_translation_table.count(addr) > 0;}
         int& operator[](const long& addr){return address_translation_table[addr];}
@@ -630,8 +633,7 @@ public:
       }
       void immediate_subscribe_address(int original_vault, int req_vault, long addr) {
         if(subscription_table.has(addr)){
-          int current_vault = subscription_table[addr];
-          immediate_unsubscribe_address(current_vault, addr); // Unscribe first to make sure we're not having any issues
+          immediate_unsubscribe_address(original_vault, addr); // Unscribe first to make sure we're not having any issues
           total_unsubscriptions_as_a_result_of_replacement++;
         }
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
@@ -741,8 +743,8 @@ public:
           req.addr_vec[int(HMC::Level::Vault)] = subscription_table[addr];
         }
         int val_vault_id = req.addr_vec[int(HMC::Level::Vault)];
-        int hops = calculate_hops_travelled(req_vault_id, val_vault_id, OTHER_LENGTH);
-        int count = (int)count_table.update_counter_table_and_get_count(req_vault_id, addr);
+        uint64_t hops = (uint64_t)calculate_hops_travelled(req_vault_id, val_vault_id, OTHER_LENGTH);
+        uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
         if(check_prefetch(hops, count)) {
           // cout << "Address " << addr << " with hop " << hops << " and count " << count << " meets subscription threshold. We now subscribe it from " << val_vault_id << " to " << req_vault_id << endl;
           subscribe_address(addr, req_vault_id, val_vault_id);
