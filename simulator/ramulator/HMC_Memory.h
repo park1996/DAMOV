@@ -447,7 +447,7 @@ public:
           list<SubscriptionTask> new_subscription_buffer;
           for(auto& i:subscription_buffer){
             if(subscription_table_is_free(i.addr)){
-              // cout << "Trying to insert " << i.addr << " into subscription table since we have space now." << endl;
+              cout << "Trying to insert " << i.addr << " into subscription table since we have space now." << endl;
               immediate_subscribe_address(i.addr, i.req_vault);
               subscription_buffer_map.erase(i.addr);
               total_subscription_from_buffer++;
@@ -457,6 +457,7 @@ public:
             }
           }
           subscription_buffer = new_subscription_buffer;
+          cout << "After this cycle, the subscription buffer has " << subscription_buffer.size() << " entries" << endl;
         }
 
         // Then, we process the transfer of subscription requests in the network
@@ -484,11 +485,12 @@ public:
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.addr)) {
-                  // cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future" << endl;
                   subscription_buffer.push_back(i);
                   subscription_buffer_map[i.addr] = prev(subscription_buffer.end());
                   total_buffer_successful_insertation++;
+                                    cout << "We push " << i.addr << " into the subscription buffer to be subscribed in the future. The subscription buffer now has " << subscription_buffer.size() << " entries" << endl;
                 } else {
+                  cout << "We cannot insert " << i.addr << " into the subscription buffer since it is full" << endl;
                   total_buffer_unsuccessful_insertation++;
                 }
               }
