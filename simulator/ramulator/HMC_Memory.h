@@ -504,6 +504,7 @@ public:
 
       // Variables used for statistic purposes
       long total_memory_accesses = 0;
+      long total_submitted_subscriptions = 0;
       long total_successful_subscriptions = 0;
       long total_unsuccessful_subscriptions = 0;
       long total_unsubscriptions = 0;
@@ -611,6 +612,7 @@ public:
         submit_subscription(victim_addr, val_vault, hops);
       }
       void submit_subscription(long addr, int mapped_vault, int hops) {
+        total_submitted_subscriptions++;
         int original_vault = find_original_vault_of_address(addr);
         pending_subscription.push_back(SubscriptionTask(addr, original_vault, mapped_vault, hops));
       }
@@ -754,6 +756,7 @@ public:
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
         cout << "Total memory accesses: " << total_memory_accesses << endl;
+        cout << "Total submitted subscriptions: " << total_submitted_subscriptions << endl;
         cout << "Total Successful Subscription: " << total_successful_subscriptions << endl;
         cout << "Total Unsuccessful Subscription: " << total_unsuccessful_subscriptions << endl;
         cout << "Total Successful Subscription from Subscription Buffer: " << total_subscription_from_buffer << endl;
@@ -883,7 +886,9 @@ public:
         if (configs.contains("prefetcher_table_replacement_policy")) {
           prefetcher_set.set_subscription_table_replacement_policy(configs["prefetcher_table_replacement_policy"]);
         }
-        prefetcher_set.initialize_sets();
+        if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+          prefetcher_set.initialize_sets();
+        }
         max_block_col_bits = spec->maxblock_entry.flit_num_bits - tx_bits;
         cout << "maxblock_entry.flit_num_bits: " << spec->maxblock_entry.flit_num_bits << " tx_bits: " << tx_bits << " max_block_col_bits: " << max_block_col_bits << endl;
 
