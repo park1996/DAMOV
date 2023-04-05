@@ -576,9 +576,12 @@ public:
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
           lru_unit.set_corresponding_table_sets(subscription_table.get_subscription_to_table_sets());
           lru_unit.initialize();
-        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
           lfu_unit.set_corresponding_table_sets(subscription_table.get_subscription_to_table_sets());
           lfu_unit.initialize();
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+          cout << "DirtyLFU is no longer supported due to it causing starving in the buffer" << endl;
+          assert(false);
         } else {
           cout << "Unknown replacement policy!" << endl;
           assert(false); // We fail early if the policy is not known.
