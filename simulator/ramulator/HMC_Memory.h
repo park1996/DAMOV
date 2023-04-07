@@ -90,6 +90,7 @@ protected:
   VectorStat record_write_conflicts;
 
   long mem_req_count = 0;
+  long total_hops = 0;
   bool num_cores;
   int max_block_col_bits;
 public:
@@ -221,8 +222,8 @@ public:
           // Initialize the subscription table
           assert(subscription_table_size % subscription_table_ways == 0);
           subscription_table_sets = subscription_table_size / subscription_table_ways;
-          cout << "Subscription Table Size: " << subscription_table_size == SIZE_MAX ? "Unlimited" : subscription_table_size << endl;
-          cout << "Subscription Table Ways: " << subscription_table_ways == SIZE_MAX ? "Unlimited" : subscription_table_ways << endl;
+          cout << "Subscription Table Size: " << (subscription_table_size == SIZE_MAX ? "Unlimited" : to_string(subscription_table_size)) << endl;
+          cout << "Subscription Table Ways: " << (subscription_table_ways == SIZE_MAX ? "Unlimited" : to_string(subscription_table_ways)) << endl;
           cout << "Subscription Table Sets: " << subscription_table_sets << endl;
           // One subscription to table per vault
           virtualized_table_sets.assign(controllers, vector<size_t>(subscription_table_sets, 0));
@@ -233,6 +234,9 @@ public:
         bool subscription_table_is_free(int table_vault, long addr) const {return virtualized_table_sets[table_vault][get_set(addr)] < subscription_table_ways;}
         bool can_insert_to_table(int original_vault, int req_vault, long addr)const{return subscription_table_is_free(req_vault, addr) && subscription_table_is_free(original_vault, addr);}
         void immediate_subscribe_address(int original_vault, int req_vault, long addr){
+          // cout << "Subscribing address " << addr << " from " << original_vault << " to " << req_vault;
+          // cout << " subscription table of vault " << original_vault << " at set " << get_set(addr) << " has entry " << virtualized_table_sets[original_vault][get_set(addr)];
+          // cout << " subscription table of vault " << req_vault << " at set " << get_set(addr) << " has entry " << virtualized_table_sets[req_vault][get_set(addr)] << endl;
           address_translation_table[addr] = req_vault; // Subscribe the remote vault to local vault
           virtualized_table_sets[req_vault][get_set(addr)]++; // Increase the "virtual" set's content count for subscription to the destination vault
           virtualized_table_sets[original_vault][get_set(addr)]++; // Increase the "virtual" set's content count for subscription from the original vault
@@ -290,7 +294,7 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "Address access history size: " << address_access_history_size == SIZE_MAX ? "Unlimited" : address_access_history_size;
+          cout << "Address access history size: " << (address_access_history_size == SIZE_MAX ? "Unlimited" : to_string(address_access_history_size));
           cout << " Corresponding table sets: " << corresponding_table_sets << endl;
           address_access_history.assign(corresponding_table_sets, list<long>());
           initialized = true;
@@ -356,7 +360,7 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "Count Priority Queue size: " << count_priority_queue_size == SIZE_MAX ? " Unlimited" : count_priority_queue_size;
+          cout << "Count Priority Queue size: " << (count_priority_queue_size == SIZE_MAX ? " Unlimited" : to_string(count_priority_queue_size));
           cout << " Corresponding table sets: " << corresponding_table_sets << endl;
           count_priority_queue.assign(corresponding_table_sets, multiset<LFUPriorityQueueItem>()); // Used for LFU
           initialized = true;
@@ -1520,6 +1524,9 @@ public:
             } else {
               hops = calculate_hops_travelled(origin_vault, destination_vault, OTHER_LENGTH);
             }
+            if(network_overhead) {
+              total_hops += calculate_hops_travelled(origin_vault, destination_vault, OTHER_LENGTH);
+            }
             req.hops = hops;
 
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
@@ -1698,6 +1705,7 @@ public:
       if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
         prefetcher_set.print_stats();
       }
+      cout << "Total number of hops travelled: " << total_hops << endl;
     }
 
     long page_allocator(long addr, int coreid) {
