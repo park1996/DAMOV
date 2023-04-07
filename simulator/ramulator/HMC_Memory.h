@@ -221,8 +221,8 @@ public:
           // Initialize the subscription table
           assert(subscription_table_size % subscription_table_ways == 0);
           subscription_table_sets = subscription_table_size / subscription_table_ways;
-          cout << "Subscription Table Size: " << subscription_table_size << endl;
-          cout << "Subscription Table Ways: " << subscription_table_ways << endl;
+          cout << "Subscription Table Size: " << subscription_table_size == SIZE_MAX ? "Unlimited" : subscription_table_size << endl;
+          cout << "Subscription Table Ways: " << subscription_table_ways == SIZE_MAX ? "Unlimited" : subscription_table_ways << endl;
           cout << "Subscription Table Sets: " << subscription_table_sets << endl;
           // One subscription to table per vault
           virtualized_table_sets.assign(controllers, vector<size_t>(subscription_table_sets, 0));
