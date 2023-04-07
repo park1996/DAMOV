@@ -169,6 +169,7 @@ public:
     std::map<string, SubscriptionPrefetcherType> name_to_prefetcher_type = {
       {"None", SubscriptionPrefetcherType::None},
       {"Swap", SubscriptionPrefetcherType::Swap},
+      {"Allocate", SubscriptionPrefetcherType::Allocate},
     };
 
     // A subscription based prefetcher
@@ -477,7 +478,7 @@ public:
         }
         auto operator[](const size_t& i) -> decltype(count_tables[i]){return count_tables[i];}
         void print_stats(){
-          cout << "We have inserted " << insertions << " into the counter table " << " and evicted " << evictions << " from it." << endl;
+          cout << "We have accessed " << insertions << " times to the counter table " << " and evicted " << evictions << " from it. The number of accesses without eviction is " << (insertions - evictions) << endl;
         }
       };
       CountTable count_table;
@@ -554,6 +555,10 @@ public:
         subscription_table_replacement_policy = name_to_prefetcher_rp[policy];
         cout << "Subscription table replacement policy is: " << policy << endl;
       }
+      void set_counter_table_size(size_t size) {count_table.set_counter_table_size(size);}
+      void set_counter_bits(int bits) {count_table.set_counter_bits(bits);}
+      void set_tag_bits(int bits) {count_table.set_tag_bits(bits);}
+      void set_swap_switch(bool val) {swap = val;}
       void initialize_sets(){
         subscription_table.initialize();
         count_table.initialize();
@@ -579,34 +584,43 @@ public:
             // cout << "Address " << addr << " does not exist in the subscription table" << endl;
             return; // If there is no local record, do nothing.
         }
+        long victim_addr = 0;
         // Calculate the address vector based on the address
         vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
         // Calculate "hops" - it is actually the number of cycles it takes for the unsubscribe request to finish
         int hops = calculate_hops_travelled(addr_vec[int(HMC::Level::Vault)], subscription_table[addr], WRITE_LENGTH);
-        // We find the "victim vault" so we can swap it back. the definition is below in subscribe_address()
-        vector<int> victim_vec(addr_vec);
-        victim_vec[int(HMC::Level::Vault)] = subscription_table[addr]; // We find the original page to swap back
-        long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
-        // cout << "Submitting address " << addr << " for unsubscription. It will take " << hops << " cycles" << endl;
+        if(swap) {
+          // We find the "victim vault" so we can swap it back. the definition is below in subscribe_address()
+          vector<int> victim_vec(addr_vec);
+          victim_vec[int(HMC::Level::Vault)] = subscription_table[addr]; // We find the original page to swap back
+          victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
+          // cout << "Submitting address " << addr << " for unsubscription. It will take " << hops << " cycles" << endl;
+        }
         // Submit the address for unsubscription. If the victim address exists, we unsubscribe it too.
         submit_unsubscription(addr, subscription_table[addr], hops);
-        if(subscription_table.has(victim_addr)) {
+        if(swap && subscription_table.has(victim_addr)) {
             submit_unsubscription(victim_addr, subscription_table[victim_addr], hops);
         }
       }
       void subscribe_address(long addr, int req_vault, int val_vault) {
         // Calculate "hops" - it is actually the number of cycles it takes for the subscribe request to finish
         int hops = calculate_hops_travelled(req_vault, val_vault, READ_LENGTH);
-        // Calculate the address vector based on the address
-        vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
-        // We find the "victim address vector" so we can swap that address with our desired subscription address
-        // The "vidtim address" is currently found by locating the address with exactly same row and column as the desired remote address in the local vault
-        vector<int> victim_vec(addr_vec);
-        victim_vec[int(HMC::Level::Vault)] = req_vault; // We are locating the page in the local vault's same row & column for swapping with the remote vault
-        long victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
-        // cout << "We swap address " << addr << " with address " << victim_addr << " it will take " << hops << " cycles to complete" << endl;
+        long victim_addr = 0;
+        // If we enable swap, we find the destination of the swap and submit it too
+        if(swap){
+          // Calculate the address vector based on the address
+          vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
+          // We find the "victim address vector" so we can swap that address with our desired subscription address
+          // The "vidtim address" is currently found by locating the address with exactly same row and column as the desired remote address in the local vault
+          vector<int> victim_vec(addr_vec);
+          victim_vec[int(HMC::Level::Vault)] = req_vault; // We are locating the page in the local vault's same row & column for swapping with the remote vault
+          victim_addr = mem_ptr -> address_vector_to_address(victim_vec);
+          // cout << "We swap addres s " << addr << " with address " << victim_addr << " it will take " << hops << " cycles to complete" << endl;
+        }
         submit_subscription(addr, req_vault, hops); // Submit to wait for given number of cycles
-        submit_subscription(victim_addr, val_vault, hops);
+        if(swap) {
+          submit_subscription(victim_addr, val_vault, hops);
+        }
       }
       void submit_subscription(long addr, int mapped_vault, int hops) {
         total_submitted_subscriptions++;
@@ -894,6 +908,11 @@ public:
         if (configs.contains("subscription_prefetcher")) {
           cout << "Using prefetcher: " << configs["subscription_prefetcher"] << endl;
           subscription_prefetcher_type = name_to_prefetcher_type[configs["subscription_prefetcher"]];
+          if(subscription_prefetcher_type == SubscriptionPrefetcherType::Allocate) {
+            prefetcher_set.set_swap_switch(false);
+          } else if(subscription_prefetcher_type == SubscriptionPrefetcherType::Swap) {
+            prefetcher_set.set_swap_switch(true);
+          }
         }
 
         if (configs.contains("prefetcher_count_threshold")) {
