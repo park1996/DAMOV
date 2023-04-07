@@ -187,90 +187,69 @@ public:
       class SubscriptionTable{
         private:
         bool initialized = false; // Each subscription table can be only initialized once
-        int controllers = 1;
-        size_t subscription_to_table_size = SIZE_MAX;
-        size_t subscription_to_table_ways = subscription_to_table_size;
-        size_t subscription_to_table_sets = subscription_to_table_size / subscription_to_table_ways;
-        // Reserved for the next step (one subscription table per vault)
-        size_t subscription_from_table_size = SIZE_MAX;
-        size_t subscription_from_table_ways = subscription_from_table_size;
-        size_t subscription_from_table_sets = subscription_from_table_size / subscription_from_table_ways;
-        // Reserved code end
+        int controllers = 1; // How many subscription tables there are, usually the same as the core(vault) number
+        // Specs for Subscription table
+        size_t subscription_table_size = SIZE_MAX;
+        size_t subscription_table_ways = subscription_table_size;
+        size_t subscription_table_sets = subscription_table_size / subscription_table_ways;
+        // Actual data structure for those tables
         unordered_map<long, int> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
-        vector<size_t> virtualized_to_table_sets; // Used for limiting the number of ways in each "set" in each subscription table
-        vector<size_t> virtualized_from_table_sets; // Reserved for next step. Denoting how many subscriptions have been made from this vault
+        vector<vector<size_t>> virtualized_table_sets; // Used for limiting the number of ways in each "set" in each subscription table
         public:
         SubscriptionTable(){}
-        SubscriptionTable(size_t size, size_t ways):subscription_to_table_size(size),subscription_to_table_ways(ways) {initialize();} // Used currently, only set from table size
-        SubscriptionTable(int controllers, size_t from_table_size, size_t from_table_ways, size_t to_table_size, size_t to_table_ways):controllers(controllers),subscription_to_table_size(to_table_size),subscription_to_table_ways(to_table_ways),subscription_from_table_size(from_table_size),subscription_from_table_ways(from_table_ways){initialize();}// Reserved. Set both from and to table specs
-        void set_subscription_to_table_size(size_t size) {
-          subscription_to_table_size = size;
+        SubscriptionTable(size_t size, size_t ways):subscription_table_size(size),subscription_table_ways(ways) {initialize();} // Only set from table size
+        SubscriptionTable(int controllers, size_t size, size_t ways):controllers(controllers),subscription_table_size(size),subscription_table_ways(ways){initialize();}// Set both from and to table specs
+        void set_subscription_table_size(size_t size) {
+          subscription_table_size = size;
           // If we have not set the table ways, we make it fully associative to prevent any issues
-          if(subscription_to_table_ways == SIZE_MAX){
-            subscription_to_table_ways = size;
+          if(subscription_table_ways == SIZE_MAX){
+            subscription_table_ways = size;
           }
         }
-        void set_subscription_to_table_ways(size_t ways) {subscription_to_table_ways = ways;}
-        size_t get_subscription_to_table_size()const{return subscription_to_table_size;}
-        size_t get_subscription_to_table_ways()const{return subscription_to_table_ways;}
-        size_t get_subscription_to_table_sets()const{return subscription_to_table_sets;}
-        void set_subscription_from_table_size(size_t size) {
-          subscription_from_table_size = size;
-          // If we have not set the table ways, we make it fully associative to prevent any issues
-          if(subscription_from_table_ways == SIZE_MAX){
-            subscription_from_table_ways = size;
-          }
-        }
-        void set_subscription_from_table_ways(size_t ways) {subscription_from_table_ways = ways;}
-        size_t get_subscription_from_table_size()const{return subscription_from_table_size;}
-        size_t get_subscription_from_table_ways()const{return subscription_from_table_ways;}
-        size_t get_subscription_from_table_sets()const{return subscription_from_table_sets;}
+        void set_subscription_table_ways(size_t ways) {subscription_table_ways = ways;}
+        size_t get_subscription_table_size()const{return subscription_table_size;}
+        size_t get_subscription_table_ways()const{return subscription_table_ways;}
+        size_t get_subscription_table_sets()const{return subscription_table_sets;}
+        void set_controllers(int controllers) {this -> controllers = controllers;}
+        int get_controllers() {return controllers;}
         // We split initialize() function from constructor as it might be called after constructor. It can be only exec'ed once
         void initialize(){
           // We can only initialize once
           assert(!initialized);
           // Report the number of vaults first (we are now using 1 table for all vaults so it is always 1)
           cout << "We are simulating " << controllers << " subscription tables." << endl;
-          // Initialize the "Subscription to" table
-          assert(subscription_to_table_size % subscription_to_table_ways == 0);
-          subscription_to_table_sets = subscription_to_table_size / subscription_to_table_ways;
-          cout << "Subscription To Table Size: " << subscription_to_table_size << endl;
-          cout << "Subscription To Table Ways: " << subscription_to_table_ways << endl;
-          cout << "Subscription To Table Sets: " << subscription_to_table_sets << endl;
-          virtualized_to_table_sets.assign(subscription_to_table_sets, 0);
+          // Initialize the subscription table
+          assert(subscription_table_size % subscription_table_ways == 0);
+          subscription_table_sets = subscription_table_size / subscription_table_ways;
+          cout << "Subscription Table Size: " << subscription_table_size << endl;
+          cout << "Subscription Table Ways: " << subscription_table_ways << endl;
+          cout << "Subscription Table Sets: " << subscription_table_sets << endl;
+          // One subscription to table per vault
+          virtualized_table_sets.assign(controllers, vector<size_t>(subscription_table_sets, 0));
 
-          // Initialize the "Subscription from" table
-          assert(subscription_from_table_size % subscription_from_table_ways == 0);
-          subscription_from_table_sets = subscription_from_table_size / subscription_from_table_ways;
-          cout << "Subscription From Table Size: " << subscription_from_table_size << endl;
-          cout << "Subscription From Table Ways: " << subscription_from_table_ways << endl;
-          cout << "Subscription From Table Sets: " << subscription_from_table_sets << endl;
-          virtualized_from_table_sets.assign(subscription_from_table_sets, 0);
           initialized = true;
         }
-        size_t get_from_table_set(long addr)const{return addr % subscription_from_table_sets;}
-        size_t get_to_table_set(long addr)const{return addr % subscription_to_table_sets;}
-        bool subscription_to_table_is_free(int req_vault, long addr) const {return virtualized_to_table_sets[get_to_table_set(addr)] < subscription_to_table_ways;}
-        bool subscription_from_table_is_free(int original_vault, long addr) const {return true;/*return virtualized_from_table_sets[get_from_table_set(addr)] < subscription_from_table_ways;*/}//Currently not used so always return true
-        bool can_insert_to_table(int original_vault, int req_vault, long addr)const{return subscription_to_table_is_free(req_vault, addr) && subscription_from_table_is_free(original_vault, addr);}
+        size_t get_set(long addr)const{return addr % subscription_table_sets;}
+        bool subscription_table_is_free(int table_vault, long addr) const {return virtualized_table_sets[table_vault][get_set(addr)] < subscription_table_ways;}
+        bool can_insert_to_table(int original_vault, int req_vault, long addr)const{return subscription_table_is_free(req_vault, addr) && subscription_table_is_free(original_vault, addr);}
         void immediate_subscribe_address(int original_vault, int req_vault, long addr){
           address_translation_table[addr] = req_vault; // Subscribe the remote vault to local vault
-          virtualized_to_table_sets[get_to_table_set(addr)]++; // Increase the "virtual" set's content count in the "subscribed to this vault" table
-          virtualized_from_table_sets[get_from_table_set(addr)]++; // Increase the "virtual" set's content count in the "subscribed from this vault" table (reserved)
+          virtualized_table_sets[req_vault][get_set(addr)]++; // Increase the "virtual" set's content count for subscription to the destination vault
+          virtualized_table_sets[original_vault][get_set(addr)]++; // Increase the "virtual" set's content count for subscription from the original vault
         }
         void immediate_unsubscribe_address(int original_vault, long addr){
           // Actually remove the address from the table
           int current_vault = address_translation_table[addr];
           address_translation_table.erase(addr);
 
-          // Decrease the "virtual" set's content count in the "subscribed from this vault" table (reserved)
-          if(virtualized_from_table_sets[get_from_table_set(addr)] > 0) {
-            virtualized_from_table_sets[get_from_table_set(addr)]--;
+          // Decrease the "virtual" set's content count for subscription from the original vault
+          if(virtualized_table_sets[original_vault][get_set(addr)] > 0) {
+            virtualized_table_sets[original_vault][get_set(addr)]--;
           }
 
-          // Decrease the "virtual" set's content count in the "subscribed to this vault" table
-          if(virtualized_to_table_sets[get_to_table_set(addr)] > 0) {
-            virtualized_to_table_sets[get_to_table_set(addr)]--;
+          // Decrease the "virtual" set's content count for subscription to the destination vault
+          if(virtualized_table_sets[current_vault][get_set(addr)] > 0) {
+            virtualized_table_sets[current_vault][get_set(addr)]--;
           }
         }
         bool has(long addr) const{return address_translation_table.count(addr) > 0;}
@@ -311,8 +290,7 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "We are using LRU as the eviction policy." << endl;
-          cout << "Address access history size: " << address_access_history_size << endl;
+          cout << "Address access history size: " << address_access_history_size;
           cout << "Corresponding table sets: " << corresponding_table_sets << endl;
           address_access_history.assign(corresponding_table_sets, list<long>());
           initialized = true;
@@ -347,7 +325,7 @@ public:
           assert(initialized);
           return address_access_history[get_set(addr)].back();
         }
-      } lru_unit;
+      };
       class LFUUnit {
         private:
         bool initialized = false;
@@ -378,8 +356,7 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "We are using LFU as the eviction policy." << endl;
-          cout << "Count Priority Queue size: " << count_priority_queue_size << endl;
+          cout << "Count Priority Queue size: " << count_priority_queue_size;
           cout << "Corresponding table sets: " << corresponding_table_sets << endl;
           count_priority_queue.assign(corresponding_table_sets, multiset<LFUPriorityQueueItem>()); // Used for LFU
           initialized = true;
@@ -426,7 +403,9 @@ public:
           // }
           return count_priority_queue[get_set(addr)].begin() -> addr; // LFU Logic
         }
-      } lfu_unit;
+      };
+      vector<LRUUnit> lru_units;
+      vector<LFUUnit> lfu_units;
 
       // Count table. Tracks the # of accesses for each memory location so we can submit for subscription when it reaches threshold
       class CountTable {
@@ -531,19 +510,20 @@ public:
     public:
       SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
         count_table.set_controllers(controllers);
+        subscription_table.set_controllers(controllers);
       }
       int find_original_vault_of_address(long addr){
         vector<int> addr_vec = mem_ptr -> address_to_address_vector(addr);
         return addr_vec[int(HMC::Level::Vault)];
       }
       bool subscription_buffer_is_free(int req_vault) const {return subscription_buffer.size() < subscription_buffer_size;}
-      long find_victim_for_unsubscription(long addr) const {
+      long find_victim_for_unsubscription(int vault, long addr) const {
         long victim_addr = 0;
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-          victim_addr = lru_unit.find_victim(addr); // LRU Logic
+          victim_addr = lru_units[vault].find_victim(addr); // LRU Logic
         } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
           // cout << "We found victim " << lfu_unit.find_victim(addr) << endl;
-          victim_addr = lfu_unit.find_victim(addr); // LFU Logic
+          victim_addr = lfu_units[vault].find_victim(addr); // LFU Logic
         } else {
           // If our replacement policy is unknown, we fail deliberately
           assert(false);
@@ -558,13 +538,13 @@ public:
         prefetch_count_threshold = threshold;
         cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
       }
-      void set_subscription_to_table_size(size_t size) {
-        if(subscription_table.get_subscription_to_table_ways() == SIZE_MAX){
-          subscription_table.set_subscription_to_table_ways(size);
+      void set_subscription_table_size(size_t size) {
+        if(subscription_table.get_subscription_table_ways() == SIZE_MAX){
+          subscription_table.set_subscription_table_ways(size);
         }
-        subscription_table.set_subscription_to_table_size(size);
+        subscription_table.set_subscription_table_size(size);
       }
-      void set_subscription_to_table_ways(size_t ways) {subscription_table.set_subscription_to_table_ways(ways);}
+      void set_subscription_table_ways(size_t ways) {subscription_table.set_subscription_table_ways(ways);}
       void set_subscription_buffer_size(size_t size) {subscription_buffer_size = size;}
       void set_subscription_table_replacement_policy(string policy) {
         subscription_table_replacement_policy = name_to_prefetcher_rp[policy];
@@ -574,11 +554,9 @@ public:
         subscription_table.initialize();
         count_table.initialize();
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-          lru_unit.set_corresponding_table_sets(subscription_table.get_subscription_to_table_sets());
-          lru_unit.initialize();
+          lru_units.assign(controllers, LRUUnit(subscription_table.get_subscription_table_sets()));
         } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
-          lfu_unit.set_corresponding_table_sets(subscription_table.get_subscription_to_table_sets());
-          lfu_unit.initialize();
+          lfu_units.assign(controllers, LFUUnit(subscription_table.get_subscription_table_sets()));
         } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
           cout << "DirtyLFU is no longer supported due to it causing starving in the buffer" << endl;
           assert(false);
@@ -638,14 +616,17 @@ public:
         pending_unsubscription.push_back(SubscriptionTask(addr, original_vault, mapped_vault, hops));
       }
       void immediate_unsubscribe_address(int original_vault, long addr) { // unless otherwise specifiedd, "addr" in arguments below are preprocessed addresses
-        if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-          lru_unit.erase(addr); // LRU Logic - Remove the address from the LRU unit
-        } else if (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
-          // We have a "Dirty LFU" logic that simply don't reset the count to 0 on unsubscription and we will use it to see if that has better performance
-          // Because most times a line will just have 1-3 counts before being evicted
-          lfu_unit.erase(addr); // LFU Logic - Remove the address from the LFU unit
-        } // If it's dirty LFU, we do nothing since it we want to keep the count even if it's unsubscribed
         if(subscription_table.has(addr)){
+          int current_vault = subscription_table[addr];
+          if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
+            // LRU Logic - We try to erase both the original and value vaults' entry of the address
+            lru_units[current_vault].erase(addr);
+            lru_units[original_vault].erase(addr);
+          } else if (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
+            // LFU Logic - We try to erase both the original and value vaults' entry of the address
+            lfu_units[current_vault].erase(addr);
+            lfu_units[original_vault].erase(addr);
+          } // If it's dirty LFU, we do nothing since it we want to keep the count even if it's unsubscribed
           subscription_table.immediate_unsubscribe_address(original_vault, addr);
           total_unsubscriptions++;
         }
@@ -657,9 +638,13 @@ public:
           total_unsubscriptions_as_a_result_of_replacement++;
         }
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-          lru_unit.touch(addr); // LRU Logic - Insert the address into the LRU unit
+          // Update the LRU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
+          lru_units[original_vault].touch(addr);
+          lru_units[req_vault].touch(addr);
         } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
-          lfu_unit.touch(addr); // LFU Logic - Insert the address into the LFU unit
+          // Update the LFU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
+          lfu_units[original_vault].touch(addr);
+          lfu_units[req_vault].touch(addr);
         }
         // cout << "Immediately subscribing address " << addr << " from " << original_vault << " to " << req_vault << endl;
         subscription_table.immediate_subscribe_address(original_vault, req_vault, addr);
@@ -702,12 +687,23 @@ public:
                 }
               // Otherwise, we try to make some new space and insert the task into the buffer
               } else {
-                // if the subscription is full when the request arrives, we try to free up a subscription table entry
-                long victim_addr = find_victim_for_unsubscription(i.addr);
-                // cout << "We pick " << victim_addr << " to evict from the table." << endl;
-                // If the victim address is somehow the same as the pending subscription address, do nothing
-                //if(i.addr != victim_addr){
-                unsubscribe_address(victim_addr);
+                // if the subscription table (either the original or destination or both) is full when the request arrives, we try to free up a subscription table entry
+                // We first check if the original vault (i.e. where the vault originally was)'s subscription table is full
+                // If so, we try to evict something from it
+                if(!subscription_table.subscription_table_is_free(i.original_vault, i.addr)){
+                  long victim_addr = find_victim_for_unsubscription(i.original_vault, i.addr);
+                  // cout << "We pick " << victim_addr << " to evict from the table." << endl;
+                  unsubscribe_address(victim_addr);
+                }
+
+                // Then, we check if the destination vault (i.e. where we're trying to move the data to)'s subscription table is full
+                // We check and attempt to evict from both sides as the eviction may be different entries
+                if(!subscription_table.subscription_table_is_free(i.req_vault, i.addr)){
+                  long victim_addr = find_victim_for_unsubscription(i.req_vault, i.addr);
+                  // cout << "We pick " << victim_addr << " to evict from the table." << endl;
+                  unsubscribe_address(victim_addr);
+                }
+
                 // But the unsubscription won't take effect instantly, so we have to put the subscription request in a buffer and wait
                 // If the buffer is even full, we do nothing further (and there is nothing we can do)
                 if(subscription_buffer_is_free(i.req_vault)) {
@@ -722,7 +718,7 @@ public:
                   // cout << "We cannot push " << i.addr << " because the subscription buffer is full" << endl;
                   total_buffer_unsuccessful_insertation++;
                 }
-                //}
+
               }
             }
             continue;
@@ -757,18 +753,24 @@ public:
         pre_process_addr(addr);
         // We take the requester's vault # for easier processing
         int req_vault_id = req.coreid;
+        int original_vault_id = req.addr_vec[int(HMC::Level::Vault)];
+        int val_vault_id = original_vault_id;
         // If we have the address in the subscription table, we have it in LRU or LFU unit, and we send it to the unit for counting
         if(subscription_table.has(addr)) {
+          val_vault_id = subscription_table[addr];
           if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
-            lru_unit.touch(addr); // LRU Logic
+            // Update the LRU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
+            lru_units[original_vault_id].touch(addr);
+            lru_units[val_vault_id].touch(addr);
           } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
-            lfu_unit.touch(addr); // LFU Logic
+            // Update the LFU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
+            lfu_units[original_vault_id].touch(addr);
+            lfu_units[val_vault_id].touch(addr);
           }
           // cout << "Redirecting " << addr << " to vault " << subscription_table[addr] << " because it is subscribed" << endl;
           // Also, we set the address vector's vault to the subscribed vault so it can be sent to the correct vault for processing.
-          req.addr_vec[int(HMC::Level::Vault)] = subscription_table[addr];
+          req.addr_vec[int(HMC::Level::Vault)] = val_vault_id;
         }
-        int val_vault_id = req.addr_vec[int(HMC::Level::Vault)];
         // Calculate hops and count for prefetch policy check and implementation
         uint64_t hops = (uint64_t)calculate_hops_travelled(req_vault_id, val_vault_id, OTHER_LENGTH);
         uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
@@ -898,12 +900,12 @@ public:
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
-        if (configs.contains("prefetcher_subscription_to_table_size")) {
-          prefetcher_set.set_subscription_to_table_size(stoi(configs["prefetcher_subscription_to_table_size"]));
+        if (configs.contains("prefetcher_subscription_table_size")) {
+          prefetcher_set.set_subscription_table_size(stoi(configs["prefetcher_subscription_table_size"]));
         }
 
-        if (configs.contains("prefetcher_subscription_to_table_way")) {
-          prefetcher_set.set_subscription_to_table_ways(stoi(configs["prefetcher_subscription_to_table_way"]));
+        if (configs.contains("prefetcher_subscription_table_way")) {
+          prefetcher_set.set_subscription_table_ways(stoi(configs["prefetcher_subscription_table_way"]));
         }
 
         if (configs.contains("prefetcher_subscription_buffer_size")) {
