@@ -443,7 +443,7 @@ public:
         int get_controllers()const{return controllers;}
         void initialize(){
           assert(!initialized);
-          cout << "Counter table size: " << counter_table_size << endl;
+          cout << "Counter table size: " << counter_table_size << " We use " << counter_bits << " bits for counter and " << tag_bits << " bits for tag" << endl;
           count_tables.assign(controllers, vector<CountTableEntry>(counter_table_size, CountTableEntry(0, 0)));
           initialized = true;
         }
@@ -938,6 +938,11 @@ public:
         if (configs.contains("prefetcher_table_replacement_policy")) {
           prefetcher_set.set_subscription_table_replacement_policy(configs["prefetcher_table_replacement_policy"]);
         }
+
+        if (configs.contains("prefetcher_count_table_size")) {
+          prefetcher_set.set_counter_table_size(stoi(configs["prefetcher_count_table_size"]));
+        }
+
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           prefetcher_set.initialize_sets();
         }
