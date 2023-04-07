@@ -290,8 +290,8 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "Address access history size: " << address_access_history_size;
-          cout << "Corresponding table sets: " << corresponding_table_sets << endl;
+          cout << "Address access history size: " << address_access_history_size == SIZE_MAX ? "Unlimited" : address_access_history_size;
+          cout << " Corresponding table sets: " << corresponding_table_sets << endl;
           address_access_history.assign(corresponding_table_sets, list<long>());
           initialized = true;
         }
@@ -356,8 +356,8 @@ public:
         void initialize(){
           // We can only initialize once
           assert(!initialized);
-          cout << "Count Priority Queue size: " << count_priority_queue_size;
-          cout << "Corresponding table sets: " << corresponding_table_sets << endl;
+          cout << "Count Priority Queue size: " << count_priority_queue_size == SIZE_MAX ? " Unlimited" : count_priority_queue_size;
+          cout << " Corresponding table sets: " << corresponding_table_sets << endl;
           count_priority_queue.assign(corresponding_table_sets, multiset<LFUPriorityQueueItem>()); // Used for LFU
           initialized = true;
         }
