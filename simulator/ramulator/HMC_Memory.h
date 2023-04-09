@@ -300,15 +300,19 @@ public:
           address_access_history.assign(corresponding_table_sets, list<long>());
           initialized = true;
         }
-        void touch(long addr){
-          // If there exists the address in access history, we first remove it
-          if(address_access_history_map.count(addr)) {
+        void erase(long addr){
+          if(address_access_history_map.count(addr)){
             address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
             address_access_history_map.erase(addr);
             address_access_history_used--;
           }
+        }
+        void touch(long addr){
+          // If there exists the address in access history, we first remove it
+          erase(addr);
           // Then if the address access history table is still larger than maximum minus one, we make some space
-          while(address_access_history_used >= address_access_history_size) {
+          // TODO: Make this global
+          while(!address_access_history[get_set(addr)].empty() && address_access_history_used >= address_access_history_size) {
             long last = address_access_history[get_set(addr)].back();
             address_access_history[get_set(addr)].pop_back();
             address_access_history_map.erase(last);
@@ -318,13 +322,6 @@ public:
           address_access_history[get_set(addr)].push_front(addr);
           address_access_history_used++;
           address_access_history_map[addr] = address_access_history[get_set(addr)].begin();
-        }
-        void erase(long addr){
-          if(address_access_history_map.count(addr)){
-            address_access_history[get_set(addr)].erase(address_access_history_map[addr]);
-            address_access_history_map.erase(addr);
-            address_access_history_used--;
-          }
         }
         long find_victim(long addr)const{
           assert(initialized);
@@ -368,7 +365,7 @@ public:
         }
         void touch(long addr){
           // First we set the count to 0, in case we are handling new entry
-          LFUPriorityQueueItem item = LFUPriorityQueueItem(addr, 0);
+          LFUPriorityQueueItem item(addr, 0);
           // Then, we try to find the existing entry with same address, take it's data to item, increase the count, then remove it from the table pending reinsertion
           if(count_priority_queue_map.count(addr)) {
             auto it = count_priority_queue_map[addr];
@@ -379,7 +376,8 @@ public:
             count_priority_queue_used--;
           }
           // Also, we check if the table has free space, and try make one if it doesn't
-          while(count_priority_queue_used >= count_priority_queue_size) {
+          // TODO: Make it global
+          while(!count_priority_queue[get_set(addr)].empty() && count_priority_queue_used >= count_priority_queue_size) {
             auto it = count_priority_queue[get_set(addr)].begin();
             long top_addr = it -> addr;
             count_priority_queue[get_set(addr)].erase(it);
@@ -476,7 +474,7 @@ public:
           insertions++;
           return count_tables[req_vault][index].count;
         }
-        auto operator[](const size_t& i) -> decltype(count_tables[i]){return count_tables[i];}
+        vector<CountTableEntry>& operator[](const size_t& i) {return count_tables[i];}
         void print_stats(){
           cout << "We have accessed " << insertions << " times to the counter table " << " and evicted " << evictions << " from it. The number of accesses without eviction is " << (insertions - evictions) << endl;
         }
@@ -488,7 +486,7 @@ public:
       uint64_t prefetch_count_threshold = 1;
 
       // A pointer so we can easily access Memory members
-      Memory<HMC, Controller>* mem_ptr;
+      Memory<HMC, Controller>* mem_ptr = nullptr;
 
       // Variables used for statistic purposes
       long total_memory_accesses = 0;
@@ -513,7 +511,7 @@ public:
       int controllers; // Record how many vaults we have
       bool swap = true; // Reserved for future use (no swap)
     public:
-      SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
+      explicit SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
         count_table.set_controllers(controllers);
         subscription_table.set_controllers(controllers);
       }
@@ -526,9 +524,11 @@ public:
         long victim_addr = 0;
         if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LRU) {
           victim_addr = lru_units[vault].find_victim(addr); // LRU Logic
-        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
           // cout << "We found victim " << lfu_unit.find_victim(addr) << endl;
           victim_addr = lfu_units[vault].find_victim(addr); // LFU Logic
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU){
+          assert(false);
         } else {
           // If our replacement policy is unknown, we fail deliberately
           assert(false);
@@ -551,7 +551,7 @@ public:
       }
       void set_subscription_table_ways(size_t ways) {subscription_table.set_subscription_table_ways(ways);}
       void set_subscription_buffer_size(size_t size) {subscription_buffer_size = size;}
-      void set_subscription_table_replacement_policy(string policy) {
+      void set_subscription_table_replacement_policy(const string& policy) {
         subscription_table_replacement_policy = name_to_prefetcher_rp[policy];
         cout << "Subscription table replacement policy is: " << policy << endl;
       }
@@ -580,7 +580,7 @@ public:
         return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
       }
       void unsubscribe_address(long addr) {
-        if(subscription_table.has(addr) == 0) {
+        if(!subscription_table.has(addr)) {
             // cout << "Address " << addr << " does not exist in the subscription table" << endl;
             return; // If there is no local record, do nothing.
         }
@@ -644,7 +644,10 @@ public:
             // LFU Logic - We try to erase both the original and value vaults' entry of the address
             lfu_units[current_vault].erase(addr);
             lfu_units[original_vault].erase(addr);
-          } // If it's dirty LFU, we do nothing since it we want to keep the count even if it's unsubscribed
+          } else if (subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+            assert(false);
+            // If it's dirty LFU, we do nothing since it we want to keep the count even if it's unsubscribed
+          }
           subscription_table.immediate_unsubscribe_address(original_vault, addr);
           total_unsubscriptions++;
         }
@@ -659,10 +662,12 @@ public:
           // Update the LRU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
           lru_units[original_vault].touch(addr);
           lru_units[req_vault].touch(addr);
-        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
           // Update the LFU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
           lfu_units[original_vault].touch(addr);
           lfu_units[req_vault].touch(addr);
+        } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+          assert(false);
         }
         // cout << "Immediately subscribing address " << addr << " from " << original_vault << " to " << req_vault << endl;
         subscription_table.immediate_subscribe_address(original_vault, req_vault, addr);
@@ -780,10 +785,12 @@ public:
             // Update the LRU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
             lru_units[original_vault_id].touch(addr);
             lru_units[val_vault_id].touch(addr);
-          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU || subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::LFU) {
             // Update the LFU entries of the address in from table (located in the original vault) and to table (located in the current subscribed vault)
             lfu_units[original_vault_id].touch(addr);
             lfu_units[val_vault_id].touch(addr);
+          } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
+            assert(false);
           }
           // cout << "Redirecting " << addr << " to vault " << subscription_table[addr] << " because it is subscribed" << endl;
           // Also, we set the address vector's vault to the subscribed vault so it can be sent to the correct vault for processing.
