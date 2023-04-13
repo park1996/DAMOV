@@ -645,12 +645,26 @@ public:
       };
       vector<SubscriptionBuffer> subscription_buffers;
       int controllers; // Record how many vaults we have
-      bool swap = true; // Reserved for future use (no swap)
+      // Control if we swap the subscribed address with its "mirror" address. Subscription
+      // SubscriptionPrefetcherType::Swap set this to true, SubscriptionPrefetcherType::Allocate set this to false
+      bool swap = false;
       int tailing_zero = 1;
+      bool debug = false; // Used to controll debug dump
     public:
       explicit SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
         tailing_zero = mem_ptr -> tx_bits + 1;
         count_table.set_controllers(controllers);
+      }
+      void print_debug_info(const string& info) {
+        if(debug) {
+          cout << "[Subscription Debug] " << info << endl;
+        }
+      }
+      void set_debug_flag(bool flag) {
+        debug = flag;
+        if(debug) {
+          print_debug_info("Debug Mode On.");
+        }
       }
       vector<int> address_to_address_vector(long addr){
         addr <<= tailing_zero;
@@ -1045,51 +1059,51 @@ public:
       void process_task_from_network(const SubscriptionTask& task) {
         switch(task.type){
           case SubscriptionTask::Type::SubReq:
-            cout << "Recv SubReq from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv SubReq from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             receive_subscribe_request(task);
             break;
           case SubscriptionTask::Type::SubReqAck:
-            cout << "Recv SubReqAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv SubReqAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             start_mirror_subscription_transfer(task);
             break;
           case SubscriptionTask::Type::SubReqNAck:
-            cout << "Recv SubReqNAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv SubReqNAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             subscription_rollback(task);
             break;
           case SubscriptionTask::Type::SubXfer:
-            cout << "Recv SubXfer from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv SubXfer from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             receive_subscription_transfer(task);
             break;
           case SubscriptionTask::Type::SubXferAck:
-            cout << "Recv SubXferAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv SubXferAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             finish_subscription_transfer(task);
             break;
           case SubscriptionTask::Type::UnsubReq:
-            cout << "Recv UnsubReq from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv UnsubReq from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             process_unsubscribe_request(task);
             break;
           case SubscriptionTask::Type::UnsubReqAck:
-            cout << "Recv UnsubReqAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv UnsubReqAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
           // It seems we do not need to do anything in the case of unsubscription request acknowledgement
             break;
           case SubscriptionTask::Type::UnsubXfer:
-            cout << "Recv UnsubXfer from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv UnsubXfer from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             process_unsubscribe_transfer(task);
             break;
           case SubscriptionTask::Type::UnsubXferAck:
-            cout << "Recv UnsubXferAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv UnsubXferAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             complete_unsubscribe_transfer(task);
             break;
           case SubscriptionTask::Type::ResubReq:
-            cout << "Recv ResubReq from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv ResubReq from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             process_resubscription_request(task);
             break;
           case SubscriptionTask::Type::ResubXfer:
-            cout << "Recv ResubXfer from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv ResubXfer from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             receive_subscription_transfer(task);
             break;
           case SubscriptionTask::Type::ResubXferAck:
-            cout << "Recv ResubXferAck from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
+            print_debug_info("Recv ResubXferAck from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             finish_resubscription_transfer(task);
             break;
           default:
@@ -1155,7 +1169,7 @@ public:
           } else if(subscription_table_replacement_policy == SubscriptionPrefetcherReplacementPolicy::DirtyLFU) {
             assert(false);
           }
-          cout << "Redirecting " << addr << " to vault " << subscription_tables[original_vault_id][addr] << " because it is subscribed" << endl;
+          print_debug_info("Redirecting "+to_string(addr)+" to vault "+to_string(subscription_tables[original_vault_id][addr])+" because it is subscribed");
           // Also, we set the address vector's vault to the subscribed vault so it can be sent to the correct vault for processing.
           req.addr_vec[int(HMC::Level::Vault)] = val_vault_id;
         }
@@ -1311,6 +1325,10 @@ public:
 
         if (configs.contains("prefetcher_count_table_size")) {
           prefetcher_set.set_counter_table_size(stoi(configs["prefetcher_count_table_size"]));
+        }
+
+        if (configs.contains("print_debug_info")) {
+          prefetcher_set.set_debug_flag(configs["print_debug_info"] == "true");
         }
 
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
