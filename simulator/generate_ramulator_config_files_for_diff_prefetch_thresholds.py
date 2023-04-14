@@ -26,12 +26,12 @@ for hops in hops_thresholds:
         for debug_flag in debug_flags:
             for prefetcher_type in prefetcher_types:
                 debug_tag = "DebugOn" if debug_flag == "true" else "DebugOff"
-                output_dir = os.path.join(ramulator_config_dir, "prefetcher", "HMC-SwapSubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+str(hops)+"h"+str(count)+"c-config.cfg")
+                output_dir = os.path.join(ramulator_config_dir, "prefetcher", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+str(hops)+"h"+str(count)+"c-config.cfg")
                 with open(template_dir, "r") as ins:
                     config_file = open(output_dir,"w")
                     for line in ins:
                         line = line.replace("PREFETCHER_TYPE", prefetcher_type)
-                        line = line.replace("DEBUG_FLAG", debug_tag)
+                        line = line.replace("DEBUG_FLAG", debug_flag)
                         line = line.replace("COUNT_THRESHOLD_NUMBER", str(count))
                         line = line.replace("HOPS_THRESHOLD_NUMBER", str(hops))
                         config_file.write(line)

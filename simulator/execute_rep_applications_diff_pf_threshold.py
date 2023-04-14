@@ -4,7 +4,7 @@ import subprocess
 import time
 from datetime import datetime
 import csv
-from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds, get_debug_flags, get_prefetcher_types
 
 def mkdir_p(directory):
     try:
@@ -18,8 +18,11 @@ def mkdir_p(directory):
 
 hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
+prefetcher_types = get_prefetcher_types()
+print "Starting execution with debug traces off"
+debug_tag = "debugoff"
 
-maximum_thread = 70
+maximum_thread = 100
 threads = []
 output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -27,6 +30,7 @@ mkdir_p(output_dir)
 summary_file_name = "execution_statuses_summary.csv"
 summary_file = os.path.join(output_dir, summary_file_name)
 summary_file_header = ["Processor Type", "Core #", "Benchmark Suite", "Benchmark Function", "Status"]
+failed_benchmarks = []
 
 
 with open(summary_file, "a") as status_summary:
@@ -36,16 +40,18 @@ with open(summary_file, "a") as status_summary:
 
 def run_benchmark(processor_type, benchmark_suite, core_number, function):
     config_file = os.path.join("config_files", processor_type, benchmark_suite, core_number, function+".cfg")
-    stdout_file = os.path.join(output_dir, processor_type+"_"+core_number+"_"+benchmark_suite+"_"+function+".txt")
+    stdout_file = os.path.join(output_dir, processor_type.replace("/", "_")+"_"+core_number+"_"+benchmark_suite+"_"+function+".txt")
     return_code = 1
     with open(stdout_file, "w") as output_file:
         return_code = subprocess.call(["build/opt/zsim", config_file], stdout=output_file, stderr=output_file)
     with open(summary_file, "a") as status_summary:
         csv_writer = csv.writer(status_summary, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         if return_code == 0:
-            csv_writer.writerow([processor_type, core_number, benchmark_suite, function, "Success"])
+            csv_writer.writerow([processor_type.replace("/", "_"), core_number, benchmark_suite, function, "Success"])
         else:
-            csv_writer.writerow([processor_type, core_number, benchmark_suite, function, "Failed"])
+            csv_writer.writerow([processor_type.replace("/", "_"), core_number, benchmark_suite, function, "Failed"])
+            if "pim_prefetch" in processor_type:
+                failed_benchmarks.append([processor_type, benchmark_suite, core_number, function])
 
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["resnet152_gemm_nn", "yolo_gemm_nn"],
@@ -68,11 +74,11 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["OOPPAD_OOPPAD"],
 processor_types = ["pim_ooo_netoh"] # Include one for baseline
 core_numbers = ["32"]
 processor_type_prefix = "pim_prefetch_netoh_"
-prefetcher_types = ["swap"]
+prefetcher_types = ["allocate"]
 for prefetcher_type in prefetcher_types:
     for hops_threshold in hops_thresholds:
         for count_threshold in count_thresholds:
-            processor_types.append(processor_type_prefix+prefetcher_type+str(hops_threshold)+"h"+str(count_threshold)+"c")
+            processor_types.append(processor_type_prefix+prefetcher_type+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag)
 
 total_experiment_count = 0
 for suite in benchmark_suites_and_benchmarks_functions.keys():
@@ -87,7 +93,7 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
         for processor_type in processor_types:
             for core_number in core_numbers:
                 scheduled_experiments += 1
-                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
+                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
                 current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
                 threads.append(current_thread)
                 current_thread.start()
@@ -95,6 +101,29 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
                     print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
                     while threading.active_count() >= maximum_thread + 1:
                         time.sleep(1)
+print "The main thread has started all threads. Now waiting for threads to finish..."
+for thread in threads:
+    thread.join()
+
+print "The following benchmark runs has failed "+str(failed_benchmarks)
+print "Re-executing them with benchmark on for debug information"
+total_experiment_count = len(failed_benchmarks)
+scheduled_experiments = 0
+for benchmark in failed_benchmarks:
+    processor_type = benchmark[0]
+    suite = benchmark[1]
+    core_number = benchmark[2]
+    benchmark_function = benchmark[3]
+    processor_type = processor_type.replace("debugoff", "debugon")
+    scheduled_experiments += 1
+    print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
+    current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
+    threads.append(current_thread)
+    current_thread.start()
+    if threading.active_count() >= maximum_thread + 1:
+        print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
+        while threading.active_count() >= maximum_thread + 1:
+            time.sleep(1)
 print "The main thread has started all threads. Now waiting for threads to finish..."
 for thread in threads:
     thread.join()

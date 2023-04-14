@@ -2,10 +2,15 @@
 import sys
 import os
 import errno
-from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds, get_debug_flags, get_prefetcher_types
 
 hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
+prefetcher_types = get_prefetcher_types()
+debug_flags = get_debug_flags()
+debug_tags = []
+for debug_flag in debug_flags:
+    debug_tags.append("DebugOn" if debug_flag == "true" else "DebugOff")
 
 os.chdir("../workloads")
 PIM_ROOT = os.getcwd() +"/"
@@ -24,42 +29,45 @@ def mkdir_p(directory):
 def create_pim_prefetch_configs(benchmark, application, function, command):
     version = "prefetch"
     number_of_cores = [32]
-    prefetcher_types = ["Swap"]
-    postfixes = ["netoh", "memtrace"]
+    # postfixes = ["netoh", "memtrace"]
+    postfixes = ["netoh"]
 
     for cores in number_of_cores:
         for prefetcher_type in prefetcher_types:
             for postfix in postfixes:
                 for hops_threshold in hops_thresholds:
                     for count_threshold in count_thresholds:
-                        mkdir_p(ROOT+"config_files/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+str(hops_threshold)+"h"+str(count_threshold)+"c/"+benchmark+"/"+str(cores)+"/")
+                        for debug_tag in debug_tags:
+                            mkdir_p(ROOT+"config_files/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag.lower()+"/"+benchmark+"/"+str(cores)+"/")
 
     for cores in number_of_cores:
         for prefetcher_type in prefetcher_types:
             for postfix in postfixes:
                 for hops_threshold in hops_thresholds:
                     for count_threshold in count_thresholds:
-                        mkdir_p(ROOT+"zsim_stats/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+str(hops_threshold)+"h"+str(count_threshold)+"c/"+str(cores)+"/")
+                        for debug_tag in debug_tags:
+                            mkdir_p(ROOT+"zsim_stats/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag.lower()+"/"+str(cores)+"/")
 
     for cores in number_of_cores:
         for prefetcher_type in prefetcher_types:
             for postfix in postfixes:
                 for hops_threshold in hops_thresholds:
                     for count_threshold in count_thresholds:
-                        with open(ROOT+"templates/template_pim_"+version+".cfg", "r") as ins:
-                            config_file = open(ROOT+"config_files/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+str(hops_threshold)+"h"+str(count_threshold)+"c/"+benchmark+"/"+str(cores)+"/"+application+"_"+function+".cfg","w")
-                            for line in ins:
-                                line = line.replace("NUMBER_CORES", str(cores))
-                                line = line.replace("STATS_PATH", "zsim_stats/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+str(hops_threshold)+"h"+str(count_threshold)+"c/"+str(cores)+"/"+benchmark+"_"+application+"_"+function)
-                                line = line.replace("COMMAND_STRING", "\"" + command + "\";")
-                                line = line.replace("THREADS", str(cores))
-                                line = line.replace("PIM_ROOT",PIM_ROOT)
-                                line = line.replace("RAMULATOR_CONFIG_FILENAME", "HMC-"+prefetcher_type+"SubscriptionPF-"+str(hops_threshold)+"h"+str(count_threshold)+"c-config.cfg")
-                                line = line.replace("RECORD_MEMORY_TRACE_SWITCH", "true" if postfix == "memtrace" else "false")
+                        for debug_tag in debug_tags:
+                            with open(ROOT+"templates/template_pim_"+version+".cfg", "r") as ins:
+                                config_file = open(ROOT+"config_files/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag.lower()+"/"+benchmark+"/"+str(cores)+"/"+application+"_"+function+".cfg","w")
+                                for line in ins:
+                                    line = line.replace("NUMBER_CORES", str(cores))
+                                    line = line.replace("STATS_PATH", "zsim_stats/pim_"+version+"_"+postfix+"_"+prefetcher_type.lower()+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag.lower()+"/"+str(cores)+"/"+benchmark+"_"+application+"_"+function)
+                                    line = line.replace("COMMAND_STRING", "\"" + command + "\";")
+                                    line = line.replace("THREADS", str(cores))
+                                    line = line.replace("PIM_ROOT",PIM_ROOT)
+                                    line = line.replace("RAMULATOR_CONFIG_FILENAME", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+str(hops_threshold)+"h"+str(count_threshold)+"c-config.cfg")
+                                    line = line.replace("RECORD_MEMORY_TRACE_SWITCH", "true" if postfix == "memtrace" else "false")
 
-                                config_file.write(line)
-                            config_file.close()
-                        ins.close()
+                                    config_file.write(line)
+                                config_file.close()
+                            ins.close()
 
 
 if(len(sys.argv) < 2):

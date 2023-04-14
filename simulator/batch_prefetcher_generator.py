@@ -33,6 +33,8 @@ def get_count_thresholds():
 
 def get_debug_flags():
     return ["true", "false"]
+    # return ["false"]
 
 def get_prefetcher_types():
-    return ["Allocate", "Swap"]
+    # return ["Allocate", "Swap"]
+    return ["Allocate"]
