@@ -671,13 +671,15 @@ public:
         private:
         unordered_map<long, typename list<SubscriptionTask>::iterator> map; // To ensure that we don't put two addresses in the same buffer twice
         size_t buffer_size = 32;
-        public:
         list<SubscriptionTask> buffer;
+        public:
         SubscriptionBuffer(){}
         SubscriptionBuffer(size_t buffer_size):buffer_size(buffer_size){}
         bool is_free()const{return buffer.size() < buffer_size;}
         bool is_not_empty()const{return buffer.size() > 0;}
         bool has(long addr)const{return map.count(addr) > 0;}
+        SubscriptionTask& front(){return buffer.front();}
+        void pop_front(){buffer.pop_front();}
         void erase(long addr){
           buffer.erase(map[addr]);
           map.erase(addr);
@@ -867,7 +869,6 @@ public:
         // Starting by reserving space in the subscription table. For swap we need 2 entries (one for the actual subscription, one for the swapped out address)
         int required_space = swap ? 2 : 1;
         // If we have space in subscription table to put it in, and receiving buffer to receive the swapped out address in the case of swap, we proceed with subscription
-        // Take a closer look of this on resub
         if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space) && (!swap || subscription_tables[task.to_vault].receive_buffer_is_free())) {
           process_subscribe_request(task);
         // If not, but we have some space in the buffer, we insert it into the buffer
@@ -889,7 +890,6 @@ public:
         }
       }
       // Finish processing subscription request
-      // Logic may not be 100% correct re rollback
       void process_subscribe_request(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::SubReq);
         // We calculate how many hops it required to transfer the data
@@ -1179,20 +1179,11 @@ public:
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
         for(int controller = 0; controller < controllers; controller++){
           if(subscription_buffers[controller].is_not_empty()) {
-            SubscriptionTask task = subscription_buffers[controller].buffer.front();
+            SubscriptionTask task = subscription_buffers[controller].front();
             if(process_task_from_buffer(task)) {
-              subscription_buffers[controller].buffer.pop_front();
+              subscription_buffers[controller].pop_front();
               total_subscription_from_buffer++;
             }
-            // SubscriptionBuffer new_subscription_buffer;
-            // for(auto& i:subscription_buffers[controller]) {
-            //   if(!process_task_from_buffer(i)) {
-            //     new_subscription_buffer.push_back(i);
-            //   } else {
-            //     total_subscription_from_buffer++;
-            //   }
-            // }
-            // subscription_buffers[controller] = new_subscription_buffer;
           }
         }
         // Then, we process the transfer of subscription requests in the network
@@ -2013,15 +2004,8 @@ public:
               }
             }
             else if (req.type == Request::Type::WRITE){
-              if(subscription_prefetcher_type == SubscriptionPrefetcherType::None) {
-                hops = calculate_hops_travelled(requester_vault, subscribed_vault, WRITE_LENGTH);
-              } else {
-                hops = 0;
-                // We first check the subscription table of the original vault and receive information from it
-                hops += calculate_hops_travelled(requester_vault, original_vault)*2;
-                // Then we write the data to the subscribed vault
-                hops += calculate_hops_travelled(requester_vault, subscribed_vault)*WRITE_LENGTH;
-              }
+              // We write to the original vault in any case, and let the original vault determine whether to fowraed it or not
+              hops = calculate_hops_travelled(requester_vault, original_vault, WRITE_LENGTH);
             } else {
               if(subscription_prefetcher_type == SubscriptionPrefetcherType::None) {
                 hops = calculate_hops_travelled(requester_vault, subscribed_vault, OTHER_LENGTH);
