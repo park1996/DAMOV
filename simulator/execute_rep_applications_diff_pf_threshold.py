@@ -105,6 +105,9 @@ print "The main thread has started all threads. Now waiting for threads to finis
 for thread in threads:
     thread.join()
 
+if len(failed_benchmarks) == 0:
+    exit(0)
+
 print "The following benchmark runs has failed "+str(failed_benchmarks)
 print "Re-executing them with benchmark on for debug information"
 total_experiment_count = len(failed_benchmarks)

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import csv
-import sys
 from datetime import datetime
 from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
 
@@ -9,6 +8,7 @@ hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
 hops_thresholds_str = [""]
 count_thresholds_str = [""]
+debug_tag = "debugoff"
 for hops_threshold in hops_thresholds:
     hops_thresholds_str.append(str(hops_threshold)+" Hops")
 for count_threshold in count_thresholds:
@@ -59,8 +59,7 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO
     "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 processor_type_prefix = "pim_prefetch_netoh_"
-baseline_processor_type = "pim_ooo_netoh"
-prefetcher_types = ["swap"]
+prefetcher_types = ["allocate"]
 core_number = "32"
 
 output_filename = "stats_l1_miss_rate_pim_pf_with_diff_thresholds_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".csv"
@@ -78,8 +77,8 @@ with open(output_filename, mode='w') as csv_file:
                 for hops_threshold in hops_thresholds:
                     current_line = [str(hops_threshold)+" Hops"]
                     for count_threshold in count_thresholds:
-                        processor_type = processor_type_prefix+prefetcher_type+str(hops_threshold)+"h"+str(count_threshold)+"c"
-                        stat_file_location = os.path.join(stats_folders, processor_type, core_number, full_benchmark_name+".zsim.out")
+                        processor_type = processor_type_prefix+prefetcher_type
+                        stat_file_location = os.path.join(stats_folders, processor_type, str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag, core_number, full_benchmark_name+".zsim.out")
                         if not os.path.isfile(stat_file_location):
                             current_line.append("N/A")
                             continue
