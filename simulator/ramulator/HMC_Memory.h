@@ -268,12 +268,12 @@ public:
         void attach_lfu_unit(LFUUnit* ptr) {
           lfu_unit = ptr;
         }
-        void touch_lfu_lru(long addr) {
+        void insert_lru_lfu(long addr) {
           if(lru_unit != nullptr) {
-            lru_unit -> touch(addr);
+            lru_unit -> insert(addr);
           }
           if(lfu_unit != nullptr) {
-            lfu_unit -> touch(addr);
+            lfu_unit -> insert(addr);
           }
         }
         void erase_lfu_lru(long addr) {
@@ -304,7 +304,7 @@ public:
         bool receive_buffer_is_free()const{return receiving < receiving_buffer_size;}
         void submit_subscription(int req_vault, long addr){
           virtualized_table_sets[get_set(addr)]++;
-          touch_lfu_lru(addr);
+          insert_lru_lfu(addr);
           address_translation_table.insert({addr, SubscriptionTableEntry(req_vault, SubscriptionTableEntry::SubscriptionStatus::PendingSubscription)});
         }
         void complete_subscription(long addr) {
@@ -458,7 +458,13 @@ public:
             address_access_history_used--;
           }
         }
-        void touch(long addr){
+        void touch(long addr) {
+          if(address_access_history_map.count(addr) == 0) {
+            return;
+          }
+          insert(addr);
+        }
+        void insert(long addr){
           // If there exists the address in access history, we first remove it
           erase(addr);
           // Then if the address access history table is still larger than maximum minus one, we make some space
@@ -514,7 +520,13 @@ public:
           count_priority_queue.assign(corresponding_table_sets, multiset<LFUPriorityQueueItem>()); // Used for LFU
           initialized = true;
         }
-        void touch(long addr){
+        void touch(long addr) {
+          if(count_priority_queue_map.count(addr) == 0) {
+            return;
+          }
+          insert(addr);
+        }
+        void insert(long addr){
           // First we set the count to 0, in case we are handling new entry
           LFUPriorityQueueItem item(addr, 0);
           // Then, we try to find the existing entry with same address, take it's data to item, increase the count, then remove it from the table pending reinsertion
@@ -1233,10 +1245,11 @@ public:
         if(check_prefetch(hops, count)) {
           print_debug_info("Checking subscription at vault "+to_string(req_vault_id)+" and address "+to_string(addr));
           print_debug_info("Is pending subscription? "+to_string(subscription_tables[req_vault_id].is_pending_subscription(addr)));
+          print_debug_info("Is pending resubscription? "+to_string(subscription_tables[req_vault_id].is_pending_resubscription(addr)));
           print_debug_info("Is pending removal? "+to_string(subscription_tables[req_vault_id].is_pending_removal(addr)));
           print_debug_info("Is subscribed to "+to_string(req_vault_id)+"?"+to_string(subscription_tables[req_vault_id].is_subscribed(addr, req_vault_id)));
         }
-        if(check_prefetch(hops, count) && !(subscription_tables[req_vault_id].is_pending_subscription(addr) || subscription_tables[req_vault_id].is_pending_removal(addr) || subscription_tables[req_vault_id].is_subscribed(addr, req_vault_id))) {
+        if(check_prefetch(hops, count) && !(subscription_tables[req_vault_id].is_pending_subscription(addr) || subscription_tables[req_vault_id].is_pending_resubscription(addr) || subscription_tables[req_vault_id].is_pending_removal(addr) || subscription_tables[req_vault_id].is_subscribed(addr, req_vault_id))) {
           // cout << "Address " << addr << " with hop " << hops << " and count " << count << " and originally in vault " << original_vault_id << " meets subscription threshold. We now subscribe it from " << val_vault_id << " to " << req_vault_id << endl;
           subscribe_address(req_vault_id, addr);
         }
