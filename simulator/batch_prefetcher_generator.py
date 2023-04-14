@@ -30,3 +30,9 @@ def get_count_thresholds():
         count_thresholds.append(count)
         count = next_count(count, count_threshold_stepping)
     return count_thresholds
+
+def get_debug_flags():
+    return ["true", "false"]
+
+def get_prefetcher_types():
+    return ["Allocate", "Swap"]
