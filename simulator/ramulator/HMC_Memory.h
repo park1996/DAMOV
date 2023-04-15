@@ -603,6 +603,7 @@ public:
         vector<vector<CountTableEntry>> count_tables;
         long evictions = 0;
         long insertions = 0;
+        uint64_t maximum_count = 0;
         public:
         CountTable(){}
         CountTable(int controllers, size_t size, int counter_bits, int tag_bits):controllers(controllers),counter_table_size(size),counter_bits(counter_bits),tag_bits(tag_bits){initialize();}
@@ -647,11 +648,15 @@ public:
             // cout << "Updating " << addr << " in counter table. It now has count " << count_tables[req_vault][index].count << endl;
           }
           insertions++;
+          if(count_tables[req_vault][index].count > maximum_count) {
+            maximum_count = count_tables[req_vault][index].count;
+          }
           return count_tables[req_vault][index].count;
         }
         vector<CountTableEntry>& operator[](const size_t& i) {return count_tables[i];}
         void print_stats(){
           cout << "We have accessed " << insertions << " times to the counter table " << " and evicted " << evictions << " from it. The number of accesses without eviction is " << (insertions - evictions) << endl;
+          cout << "The maximum count we have stored is " << maximum_count << endl;
         }
       };
       CountTable count_table;
