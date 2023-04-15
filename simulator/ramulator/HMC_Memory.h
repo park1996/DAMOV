@@ -102,14 +102,7 @@ public:
       assert(src_vault >= 0);
       assert(dst_vault >= 0);
       assert(length >= 0);
-      int vault_destination_x = dst_vault/NETWORK_WIDTH;
-      int vault_destination_y = dst_vault%NETWORK_WIDTH;
-
-      int vault_origin_x = src_vault/NETWORK_HEIGHT;
-      int vault_origin_y = src_vault%NETWORK_HEIGHT;
-
-      int hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
-      hops = hops*length;
+      int hops = calculate_hops_travelled(src_vault, dst_vault)*length;
       assert(hops <= MAX_HOP);
       return hops;
     }
@@ -300,33 +293,44 @@ public:
         }
         size_t get_set(long addr)const{return addr % subscription_table_sets;}
         bool subscription_table_is_free(long addr, size_t required_space) const {
-          return virtualized_table_sets[get_set(addr)] + required_space <= subscription_table_ways;}
+          return virtualized_table_sets[get_set(addr)] + required_space <= subscription_table_ways;
+        }
         bool receive_buffer_is_free()const{return receiving < receiving_buffer_size;}
         void submit_subscription(int req_vault, long addr){
+          assert(!has(addr));
           virtualized_table_sets[get_set(addr)]++;
+          assert(virtualized_table_sets[get_set(addr)] <= subscription_table_ways);
           insert_lru_lfu(addr);
           address_translation_table.insert({addr, SubscriptionTableEntry(req_vault, SubscriptionTableEntry::SubscriptionStatus::PendingSubscription)});
         }
         void complete_subscription(long addr) {
+          assert(is_pending_subscription(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::Subscribed;
           }
         }
         void rollback_subscription(long addr) {
-          complete_unsubscription(addr);
+          if(!is_pending_subscription(addr)) {
+            cout << "address " << addr << " is not pending subscription, it is " << get_status(addr);
+          }
+          assert(is_pending_subscription(addr) || is_pending_removal(addr) || !has(addr));
+          remove_table_entry(addr);
         }
         void submit_unsubscription(long addr) {
+          assert(is_pending_subscription(addr) || is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::PendingRemoval;
           }
         }
         void submit_resubscription(int vault, long addr) {
+          assert(is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::PendingResubscription;
             address_translation_table.at(addr).vault = vault;
           }
         }
         void modify_subscription(int vault, long addr) {
+          assert(is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).vault = vault;
           }
@@ -344,6 +348,13 @@ public:
           receiving--;
         }
         void complete_unsubscription(long addr) {
+          remove_table_entry(addr);
+        }
+        void complete_resubscription(long addr) {
+          assert(is_pending_resubscription(addr));
+          remove_table_entry(addr);
+        }
+        void remove_table_entry(long addr) {
           if(has(addr)) {
             erase_lfu_lru(addr);
             // Actually remove the address from the table
@@ -351,6 +362,7 @@ public:
             // Decrease the "virtual" set's content count for subscription from the original vault
             if(virtualized_table_sets[get_set(addr)] > 0) {
               virtualized_table_sets[get_set(addr)]--;
+              assert(virtualized_table_sets[get_set(addr)] < subscription_table_ways);
             }
           }
         }
@@ -692,7 +704,6 @@ public:
         }
         typename list<SubscriptionTask>::iterator begin(){return buffer.begin();}
         typename list<SubscriptionTask>::iterator end(){return buffer.end();}
-        
       };
       vector<SubscriptionBuffer> subscription_buffers;
       int controllers; // Record how many vaults we have
@@ -726,7 +737,7 @@ public:
       }
       int find_original_vault_of_address(long addr){
         vector<int> addr_vec = address_to_address_vector(addr);
-        // cout << "The original vault of address " << addr << " is " << addr_vec[int(HMC::Level::Vault)] << endl;
+        // print_debug_info("The original vault of address "+to_string(addr)+" is "+to_string(addr_vec[int(HMC::Level::Vault)]));
         return addr_vec[int(HMC::Level::Vault)];
       }
       long find_victim_for_unsubscription(int vault, long addr) const {
@@ -867,25 +878,26 @@ public:
       void receive_subscribe_request(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::SubReq);
         // Starting by reserving space in the subscription table. For swap we need 2 entries (one for the actual subscription, one for the swapped out address)
-        int required_space = swap ? 2 : 1;
+        // If the address is already subscribed (to somewhere else), we do not need any space for it as we can use the existing entry
+        int required_space = subscription_tables[task.to_vault].is_subscribed(task.addr) ? (swap ? 1 : 0) : (swap ? 2 : 1);
         // If we have space in subscription table to put it in, and receiving buffer to receive the swapped out address in the case of swap, we proceed with subscription
+        // Problem when redirect and sub is not free
         if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space) && (!swap || subscription_tables[task.to_vault].receive_buffer_is_free())) {
           process_subscribe_request(task);
         // If not, but we have some space in the buffer, we insert it into the buffer
-        } else if(subscription_buffers[task.to_vault].is_free()) {
-          total_buffer_successful_insertation++;
-          print_debug_info("Pushing task "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" into the buffer at receiver");
-          subscription_buffers[task.to_vault].push_back(task);
-          long victim_addr = find_victim_for_unsubscription(task.to_vault, task.addr);
-                      print_debug_info("unsubscribe_address() 3");
-          unsubscribe_address(task.to_vault, victim_addr);
-        // Otherwise, there is nothing we can do
         } else {
-          total_buffer_unsuccessful_insertation++;
-          print_debug_info("We are pushing SubReqNack task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, task.hops, SubscriptionTask::Type::SubReqNAck));
+          if(subscription_buffers[task.to_vault].is_free()) {
+            total_buffer_successful_insertation++;
+            print_debug_info("Pushing task "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" into the buffer at receiver");
+            subscription_buffers[task.to_vault].push_back(task);
+          // Otherwise, there is nothing we can do
+          } else {
+            total_buffer_unsuccessful_insertation++;
+            print_debug_info("We are pushing SubReqNack task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
+            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, task.hops, SubscriptionTask::Type::SubReqNAck));
+          }
           long victim_addr = find_victim_for_unsubscription(task.to_vault, task.addr);
-                      print_debug_info("unsubscribe_address() 4");
+          print_debug_info("unsubscribe_address() 3");
           unsubscribe_address(task.to_vault, victim_addr);
         }
       }
@@ -911,21 +923,23 @@ public:
             subscription_tables[task.to_vault].start_receiving();
           }
         // If it is already subscribed, and not in the process of removal or subscription, we submit re-subscription request to ask the current subscribed vault to send it
-        } else if(subscription_tables[task.to_vault].is_subscribed(task.addr)){
-          int value_vault = subscription_tables[task.to_vault][task.addr];
-          int to_vaule_hops = calculate_hops_travelled(task.from_vault, value_vault);
-          // We send acknowledgement to the requester, and ask the vault vault to send the vaule back to the requester
-          print_debug_info("We are pushing ResubReq task from "+to_string(task.from_vault)+" to "+to_string(value_vault)+" with addr "+to_string(task.addr));
-          pending.push_back(SubscriptionTask(task.addr, task.from_vault, value_vault, to_vaule_hops, SubscriptionTask::Type::ResubReq));
-          if(swap) {
-            // In the case of swap, we also return the swapped out data of the original subscriber as it is no longer needed
-            long mirror_addr = find_mirror_address(value_vault, task.addr);
-            pending.push_back(SubscriptionTask(task.addr, task.to_vault, value_vault, hops*WRITE_LENGTH, SubscriptionTask::Type::UnsubXfer));
+        } else {
+          if(subscription_tables[task.to_vault].is_subscribed(task.addr)){
+            int value_vault = subscription_tables[task.to_vault][task.addr];
+            int to_vaule_hops = calculate_hops_travelled(task.from_vault, value_vault);
+            // We send acknowledgement to the requester, and ask the vault vault to send the vaule back to the requester
+            print_debug_info("We are pushing ResubReq task from "+to_string(task.from_vault)+" to "+to_string(value_vault)+" with addr "+to_string(task.addr));
+            pending.push_back(SubscriptionTask(task.addr, task.from_vault, value_vault, to_vaule_hops, SubscriptionTask::Type::ResubReq));
+            if(swap) {
+              // In the case of swap, we also return the swapped out data of the original subscriber as it is no longer needed
+              long mirror_addr = find_mirror_address(value_vault, task.addr);
+              pending.push_back(SubscriptionTask(task.addr, task.to_vault, value_vault, hops*WRITE_LENGTH, SubscriptionTask::Type::UnsubXfer));
+            }
+          // If it is in the process of removal or subscription and we are not in the process of subscribing from or removing to the requester vault, we cannot really subscribe it
+          } else if(!subscription_tables[task.to_vault].is_subscribed(task.addr) && subscription_tables[task.to_vault][task.addr] != task.from_vault) {
+            print_debug_info("We are pushing SubReqNAck task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
+            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::SubReqNAck));
           }
-        // If it is in the process of removal or subscription and we are not in the process of subscribing from or removing to the requester vault, we cannot really subscribe it
-        } else if(subscription_tables[task.to_vault][task.addr] != task.from_vault) {
-          print_debug_info("We are pushing SubReqNAck task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::SubReqNAck));
         }
       }
       // Used only when swap is set as true. For find swapout data and actually swap it out
@@ -942,13 +956,18 @@ public:
         assert(task.type == SubscriptionTask::Type::SubReqNAck);
         print_debug_info("Rollback address "+to_string(task.addr));
         subscription_tables[task.to_vault].rollback_subscription(task.addr);
+        subscription_tables[task.to_vault].stop_receiving();
         total_unsuccessful_subscriptions++;
       }
       // Upon receiving transferred data, make the subscription final and provide acknowledgement (for client side)
       void receive_subscription_transfer(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::SubXfer || task.type == SubscriptionTask::Type::ResubXfer);
+        if(subscription_tables[task.to_vault].is_pending_removal(task.addr) || !subscription_tables[task.to_vault].has(task.addr)) {
+          print_debug_info("Subscription of "+to_string(task.addr)+" is interrupted due to it being unsubscribed before finishing");
+          return;
+        }
         // Mark the local entry of the subscription table as completed and free up the receiving buffer
-        print_debug_info("Complete subscription "+to_string(task.addr)+" from "+to_string(task.from_vault)+" into "+to_string(task.to_vault));
+        print_debug_info("Complete subscription "+to_string(task.addr)+" from "+to_string(task.from_vault)+" into "+to_string(task.to_vault)+" its current status is "+to_string(subscription_tables[task.to_vault].get_status(task.addr)));
         subscription_tables[task.to_vault].complete_subscription(task.addr);
         print_debug_info("After completion, entry "+to_string(task.addr)+" exists in from vault? "+to_string(subscription_tables[task.from_vault].has(task.addr))+" status? "+to_string(subscription_tables[task.from_vault].get_status(task.addr)));
         print_debug_info("After completion, entry "+to_string(task.addr)+" exists in to vault? "+to_string(subscription_tables[task.to_vault].has(task.addr))+" status? "+to_string(subscription_tables[task.to_vault].get_status(task.addr)));
@@ -981,6 +1000,7 @@ public:
         }
       }
       // Start the unsubscription process by determining if the unsubscription is made by the holder of the address, and act accordingly
+      // TODO: This fails when we pick up an address that is pending resubscription (because we would modify the to vault in)
       void unsubscribe_address(int caller_vault, long addr) {
         if(!subscription_tables[caller_vault].has(addr)) {
           print_debug_info("We have addr "+to_string(addr)+" for subscription from vault "+to_string(caller_vault)+" but we do not have it");
@@ -1011,8 +1031,9 @@ public:
             long mirror_addr = find_mirror_address(addr, original_vault);
             pending.push_back(SubscriptionTask(mirror_addr, caller_vault, original_vault, reverse_hops, SubscriptionTask::Type::UnsubReq));
           }
-        } else {
-          print_debug_info("we are unsubscribing "+to_string(task.addr)+" with original vault "+to_string(original_vault)+" and vault vault "+to_string(current_vault)+" this is requested by "+to_string(caller_vault));
+        // When we are dealing with resubscription, the current vault is set to the future subscribed vault. We do not need to do anything as it would unsubscribe in a few cycles
+        } else if(!(subscription_tables[caller_vault].is_pending_resubscription(addr) && caller_vault != original_vault)) {
+          cout << "we are unsubscribing " << to_string(task.addr) << " with original vault " << to_string(original_vault)+" and vault " << to_string(current_vault) << " this is requested by " << to_string(caller_vault) << " and the requester is neither original or the subscribed vault";
           assert(false); // The vault requesting unsubscription should either be the original vault or current vault
         }
       }
@@ -1039,8 +1060,9 @@ public:
         } else if(subscription_tables[task.to_vault].is_pending_resubscription(task.addr) && task.from_vault == original_vault) {
           int future_subscribed_vault = subscription_tables[task.to_vault][task.addr];
           int hops = calculate_hops_travelled(task.to_vault, future_subscribed_vault);
-          print_debug_info("We are pushing UnsubXfer task from "+to_string(original_vault)+" to "+to_string(future_subscribed_vault)+" with addr "+to_string(task.addr));
-          pending.push_back(SubscriptionTask(task.addr, original_vault, future_subscribed_vault, hops, SubscriptionTask::Type::UnsubReq));
+          print_debug_info("We are pushing UnsubReq task from "+to_string(original_vault)+" to "+to_string(future_subscribed_vault)+" with addr "+to_string(task.addr));
+          // We deliberately delay the unsubscription request until the resubscription likely completes
+          pending.push_back(SubscriptionTask(task.addr, original_vault, future_subscribed_vault, hops*WRITE_LENGTH, SubscriptionTask::Type::UnsubReq));
         } else {
           print_debug_info("We are unable to unsubscribe address "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault));
           print_debug_info("Do we have this address "+to_string(subscription_tables[task.to_vault].has(task.addr)));
@@ -1084,7 +1106,7 @@ public:
         assert(task.type == SubscriptionTask::Type::ResubXferAck);
         // Upon receiving Resubscription transfer acknowledgement, we can savely remove this entry from our subscription table as it is no longer needed
         print_debug_info("Complete unsubscription of address "+to_string(task.addr));
-        subscription_tables[task.to_vault].complete_unsubscription(task.addr);
+        subscription_tables[task.to_vault].complete_resubscription(task.addr);
         total_resubscriptions++;
       }
       // Go into the buffer and check if we can process the subscription request, and if so, completes such request
@@ -1094,8 +1116,10 @@ public:
         // If hops is not 0, it means this task is from the sender's end
         if(task.hops != 0) {
           // If this task is already completed and the entry is there, we do nothing and ask the call stack to remove this task
-          if(subscription_tables[task.from_vault].is_subscribed(task.addr, task.from_vault) || subscription_tables[task.from_vault].is_pending_subscription(task.addr) || subscription_tables[task.from_vault].is_pending_removal(task.addr)) {
+          if(subscription_tables[task.from_vault].is_subscribed(task.addr, task.from_vault) || subscription_tables[task.from_vault].is_pending_subscription(task.addr, task.from_vault) || subscription_tables[task.from_vault].is_pending_removal(task.addr, task.from_vault)) {
             return true;
+          } else if(subscription_tables[task.from_vault].is_pending_subscription(task.addr) || subscription_tables[task.from_vault].is_pending_removal(task.addr) || subscription_tables[task.from_vault].is_pending_resubscription(task.addr)){
+            return false;
           // Otherwise, we see if we can insert this task into the subscription table
           } else if(subscription_tables[task.from_vault].receive_buffer_is_free() && subscription_tables[task.from_vault].subscription_table_is_free(task.addr, required_space)) {
             print_debug_info("Processing task addr "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" with hop "+to_string(task.hops));
@@ -1106,9 +1130,14 @@ public:
           }
         // Otherwise, it is in the receiver's end
         } else if(task.hops == 0) {
+          // If the address is already subscribed (to somewhere else), we do not need any space for it as we can use the existing entry
+          required_space = subscription_tables[task.to_vault].is_subscribed(task.addr) ? (swap ? 1 : 0) : (swap ? 2 : 1);
           // Same, check if it is completed
-          if(subscription_tables[task.to_vault].is_subscribed(task.addr, task.from_vault) || subscription_tables[task.to_vault].is_pending_subscription(task.addr) || subscription_tables[task.to_vault].is_pending_removal(task.addr)) {
+          if(subscription_tables[task.to_vault].is_subscribed(task.addr, task.from_vault) || subscription_tables[task.to_vault].is_pending_subscription(task.addr, task.from_vault) || subscription_tables[task.to_vault].is_pending_removal(task.addr, task.from_vault)) {
             return true;
+          }
+          else if(subscription_tables[task.to_vault].is_pending_resubscription(task.addr) || subscription_tables[task.to_vault].is_pending_subscription(task.addr) || subscription_tables[task.to_vault].is_pending_removal(task.addr)) {
+            return false;
           }
           // Check for insertion condition and insert
           else if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space) && (!swap || subscription_tables[task.to_vault].receive_buffer_is_free())) {
@@ -1177,11 +1206,11 @@ public:
 
       void tick() {
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
-        for(int controller = 0; controller < controllers; controller++){
-          if(subscription_buffers[controller].is_not_empty()) {
-            SubscriptionTask task = subscription_buffers[controller].front();
+        for(int c = 0; c < controllers; c++){
+          if(subscription_buffers[c].is_not_empty()) {
+            SubscriptionTask task = subscription_buffers[c].front();
             if(process_task_from_buffer(task)) {
-              subscription_buffers[controller].pop_front();
+              subscription_buffers[c].pop_front();
               total_subscription_from_buffer++;
             }
           }
