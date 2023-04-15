@@ -22,9 +22,11 @@ prefetcher_types = get_prefetcher_types()
 print "Starting execution with debug traces off"
 debug_tag = "debugoff"
 
+start_time = datetime.now()
+print "We are starting experiment on "+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 maximum_thread = 100
 threads = []
-output_dir_name = "execution_statuses_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
 mkdir_p(output_dir)
 summary_file_name = "execution_statuses_summary.csv"
@@ -105,28 +107,29 @@ print "The main thread has started all threads. Now waiting for threads to finis
 for thread in threads:
     thread.join()
 
-if len(failed_benchmarks) == 0:
-    exit(0)
-
-print "The following benchmark runs has failed "+str(failed_benchmarks)
-print "Re-executing them with benchmark on for debug information"
-total_experiment_count = len(failed_benchmarks)
-scheduled_experiments = 0
-for benchmark in failed_benchmarks:
-    processor_type = benchmark[0]
-    suite = benchmark[1]
-    core_number = benchmark[2]
-    benchmark_function = benchmark[3]
-    processor_type = processor_type.replace("debugoff", "debugon")
-    scheduled_experiments += 1
-    print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
-    current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
-    threads.append(current_thread)
-    current_thread.start()
-    if threading.active_count() >= maximum_thread + 1:
-        print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
-        while threading.active_count() >= maximum_thread + 1:
-            time.sleep(1)
-print "The main thread has started all threads. Now waiting for threads to finish..."
-for thread in threads:
-    thread.join()
+if len(failed_benchmarks) > 0:
+    print "The following benchmark runs has failed "+str(failed_benchmarks)
+    print "Re-executing them with benchmark on for debug information"
+    total_experiment_count = len(failed_benchmarks)
+    scheduled_experiments = 0
+    for benchmark in failed_benchmarks:
+        processor_type = benchmark[0]
+        suite = benchmark[1]
+        core_number = benchmark[2]
+        benchmark_function = benchmark[3]
+        processor_type = processor_type.replace("debugoff", "debugon")
+        scheduled_experiments += 1
+        print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + core_number + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
+        current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, core_number, benchmark_function))
+        threads.append(current_thread)
+        current_thread.start()
+        if threading.active_count() >= maximum_thread + 1:
+            print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
+            while threading.active_count() >= maximum_thread + 1:
+                time.sleep(1)
+    print "The main thread has started all threads. Now waiting for threads to finish..."
+    for thread in threads:
+        thread.join()
+end_time = datetime.now()
+print "We are finishing at "+end_time.strftime("%Y-%m-%d %H:%M:%S")
+print "It took "+str(end_time - start_time)
