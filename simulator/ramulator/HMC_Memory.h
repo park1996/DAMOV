@@ -297,6 +297,9 @@ public:
         }
         bool receive_buffer_is_free()const{return receiving < receiving_buffer_size;}
         void submit_subscription(int req_vault, long addr){
+          if(has(addr)) {
+            cout << "address " << addr << " already exists in table. its status is " << get_status(addr);
+          }
           assert(!has(addr));
           virtualized_table_sets[get_set(addr)]++;
           assert(virtualized_table_sets[get_set(addr)] <= subscription_table_ways);
@@ -304,6 +307,9 @@ public:
           address_translation_table.insert({addr, SubscriptionTableEntry(req_vault, SubscriptionTableEntry::SubscriptionStatus::PendingSubscription)});
         }
         void complete_subscription(long addr) {
+          if(!is_pending_subscription(addr)) {
+            cout << "address " << addr << " is not pending subscription, it is " << get_status(addr);
+          }
           assert(is_pending_subscription(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::Subscribed;
@@ -317,12 +323,18 @@ public:
           remove_table_entry(addr);
         }
         void submit_unsubscription(long addr) {
+          if(!is_pending_subscription(addr) || !is_subscribed(addr)) {
+            cout << "address " << addr << " is not pending subscription or subscribed, it is " << get_status(addr);
+          }
           assert(is_pending_subscription(addr) || is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::PendingRemoval;
           }
         }
         void submit_resubscription(int vault, long addr) {
+          if(!is_subscribed(addr)) {
+            cout << "address " << addr << " is not subscribed, it is " << get_status(addr);
+          }
           assert(is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::PendingResubscription;
@@ -330,6 +342,9 @@ public:
           }
         }
         void modify_subscription(int vault, long addr) {
+          if(!is_subscribed(addr)) {
+            cout << "address " << addr << " is not subscribed, it is " << get_status(addr);
+          }
           assert(is_subscribed(addr));
           if(has(addr)) {
             address_translation_table.at(addr).vault = vault;
@@ -886,7 +901,6 @@ public:
         // If the address is already subscribed (to somewhere else), we do not need any space for it as we can use the existing entry
         int required_space = subscription_tables[task.to_vault].is_subscribed(task.addr) ? (swap ? 1 : 0) : (swap ? 2 : 1);
         // If we have space in subscription table to put it in, and receiving buffer to receive the swapped out address in the case of swap, we proceed with subscription
-        // Problem when redirect and sub is not free
         if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space) && (!swap || subscription_tables[task.to_vault].receive_buffer_is_free())) {
           process_subscribe_request(task);
         // If not, but we have some space in the buffer, we insert it into the buffer
@@ -970,6 +984,8 @@ public:
         if(subscription_tables[task.to_vault].is_pending_removal(task.addr) || !subscription_tables[task.to_vault].has(task.addr)) {
           print_debug_info("Subscription of "+to_string(task.addr)+" is interrupted due to it being unsubscribed before finishing");
           return;
+        } else if(subscription_tables[task.to_vault].is_subscribed(task.addr)) {
+          print_debug_info("Subscription of "+to_string(task.addr)+" is already completed.");
         }
         // Mark the local entry of the subscription table as completed and free up the receiving buffer
         print_debug_info("Complete subscription "+to_string(task.addr)+" from "+to_string(task.from_vault)+" into "+to_string(task.to_vault)+" its current status is "+to_string(subscription_tables[task.to_vault].get_status(task.addr)));
@@ -1005,7 +1021,6 @@ public:
         }
       }
       // Start the unsubscription process by determining if the unsubscription is made by the holder of the address, and act accordingly
-      // TODO: This fails when we pick up an address that is pending resubscription (because we would modify the to vault in)
       void unsubscribe_address(int caller_vault, long addr) {
         if(!subscription_tables[caller_vault].has(addr)) {
           print_debug_info("We have addr "+to_string(addr)+" for subscription from vault "+to_string(caller_vault)+" but we do not have it");
