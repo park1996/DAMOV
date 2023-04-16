@@ -202,11 +202,13 @@ public:
         int from_vault;
         int to_vault;
         int hops;
+        bool dirty = false;
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type){}
         SubscriptionTask(){}
       };
       class LRUUnit;
       class LFUUnit;
+      class SubscriptionBuffer;
       // The actual subscription table. Translates an address to its subscribed vault
       // Some variables just to save the vaule before initialization
       size_t subscription_table_size = SIZE_MAX;
@@ -225,6 +227,7 @@ public:
         size_t receiving = 0;
         LRUUnit* lru_unit = nullptr;
         LFUUnit* lfu_unit = nullptr;
+        SubscriptionBuffer* subscription_buffer = nullptr;
         struct SubscriptionTableEntry {
           int vault;
           enum SubscriptionStatus {
@@ -234,6 +237,7 @@ public:
             PendingResubscription,
             Invalid,
           } status = SubscriptionStatus::PendingSubscription;
+          bool dirty = false;
           SubscriptionTableEntry(){}
           SubscriptionTableEntry(int vault):vault(vault){}
           SubscriptionTableEntry(int vault, SubscriptionTableEntry::SubscriptionStatus status):vault(vault),status(status){}
@@ -260,6 +264,9 @@ public:
         }
         void attach_lfu_unit(LFUUnit* ptr) {
           lfu_unit = ptr;
+        }
+        void attach_subscription_buffer(SubscriptionBuffer* ptr) {
+          subscription_buffer = ptr;
         }
         void insert_lru_lfu(long addr) {
           if(lru_unit != nullptr) {
@@ -306,6 +313,11 @@ public:
           insert_lru_lfu(addr);
           address_translation_table.insert({addr, SubscriptionTableEntry(req_vault, SubscriptionTableEntry::SubscriptionStatus::PendingSubscription)});
         }
+        void update_valid_bit(long addr){
+          if(subscription_buffer != nullptr){
+            subscription_buffer -> update_valid_bit(addr);
+          }
+        }
         void complete_subscription(long addr) {
           if(!is_pending_subscription(addr)) {
             cout << "address " << addr << " is not pending subscription, it is " << get_status(addr);
@@ -323,7 +335,7 @@ public:
           remove_table_entry(addr);
         }
         void submit_unsubscription(long addr) {
-          if(!is_pending_subscription(addr) || !is_subscribed(addr)) {
+          if(!is_pending_subscription(addr) && !is_subscribed(addr)) {
             cout << "address " << addr << " is not pending subscription or subscribed, it is " << get_status(addr);
           }
           assert(is_pending_subscription(addr) || is_subscribed(addr));
@@ -356,6 +368,17 @@ public:
           }
           return -1;
         }
+        void set_dirty(long addr){
+          if(has(addr)) {
+            address_translation_table.at(addr).dirty = true;
+          }
+        }
+        bool is_dirty(long addr)const{
+          if(has(addr)){
+            return address_translation_table.at(addr).dirty;
+          }
+          return false;
+        }
         void start_receiving() {
           receiving++;
         }
@@ -379,6 +402,7 @@ public:
               virtualized_table_sets[get_set(addr)]--;
               assert(virtualized_table_sets[get_set(addr)] < subscription_table_ways);
             }
+            update_valid_bit(addr);
           }
         }
         bool has(long addr) const{return address_translation_table.count(addr) > 0;}
@@ -699,25 +723,47 @@ public:
 
       // Buffer to be used when the subscription table is "full". Tasks in this queue is actually at its destination
       size_t subscription_buffer_size = 32; // Anything too large may take long time (days to weeks) to execute for some benchmarks, it shouldn't be too large either as it's a fully-associative queue
+      bool subscription_buffer_valid_bit_in_use = true; // We have two different implementations of subscription buffer, one is a FIFO queue and only process first element, and the other is update valid bit on subscription table changes and only process valid bit = 1 entries
       class SubscriptionBuffer {
         private:
         unordered_map<long, typename list<SubscriptionTask>::iterator> map; // To ensure that we don't put two addresses in the same buffer twice
         size_t buffer_size = 32;
         list<SubscriptionTask> buffer;
+        SubscriptionTable* subscription_table = nullptr;
+        bool valid_bit_in_use = false;
         public:
+        list<typename list<SubscriptionTask>::iterator> ready_tasks;
         SubscriptionBuffer(){}
-        SubscriptionBuffer(size_t buffer_size):buffer_size(buffer_size){}
+        SubscriptionBuffer(size_t buffer_size, bool valid_bit_in_use):buffer_size(buffer_size), valid_bit_in_use(valid_bit_in_use){}
         bool is_free()const{return buffer.size() < buffer_size;}
         bool is_not_empty()const{return buffer.size() > 0;}
         bool has(long addr)const{return map.count(addr) > 0;}
+        void attach_subscription_table(SubscriptionTable* table) {subscription_table = table;}
+        void set_valid_bit_in_use(bool val){valid_bit_in_use = val;}
         SubscriptionTask& front(){return buffer.front();}
         void pop_front(){buffer.pop_front();}
+        void update_valid_bit(long addr){
+          if(!valid_bit_in_use || subscription_table == nullptr){
+            return;
+          }
+          size_t free_set = subscription_table -> get_set(addr);
+          for(auto i = buffer.begin(); i != buffer.end(); i++) {
+            if(subscription_table -> get_set(i -> addr) == free_set){
+              // cout << "Push " << i -> addr << " into the ready queue" << endl;
+              ready_tasks.push_back(i);
+            }
+          }
+        }
+        void clear_valid_bit() {
+          ready_tasks.clear();
+        }
         void erase(long addr){
           buffer.erase(map[addr]);
           map.erase(addr);
         }
         void push_back(const SubscriptionTask& task) {
           if(buffer.size() < buffer_size && !has(task.addr)){
+            // cout << "Inserting address " << task.addr << " into buffer " << endl;;
             buffer.push_back(task);
             map[task.addr] = prev(end());
           }
@@ -822,7 +868,11 @@ public:
           assert(false); // We fail early if the policy is not known.
         }
         cout << "Subscription buffer size: " << subscription_buffer_size << endl;
-        subscription_buffers.assign(controllers, SubscriptionBuffer(subscription_buffer_size));
+        subscription_buffers.assign(controllers, SubscriptionBuffer(subscription_buffer_size, subscription_buffer_valid_bit_in_use));
+        for(int c = 0; c < controllers; c++) {
+          subscription_tables[c].attach_subscription_buffer(&subscription_buffers[c]);
+          subscription_buffers[c].attach_subscription_table(&subscription_tables[c]);
+        }
       }
       bool check_prefetch(uint64_t hops, uint64_t count) const {
         // TODO: Use machine learning to optimize prefetching
@@ -1228,10 +1278,22 @@ public:
         // First, we check if there is any subscription buffer in pending (i.e. arrived but cannot be subscribed due to subscription table space constraints)
         for(int c = 0; c < controllers; c++){
           if(subscription_buffers[c].is_not_empty()) {
-            SubscriptionTask task = subscription_buffers[c].front();
-            if(process_task_from_buffer(task)) {
-              subscription_buffers[c].pop_front();
-              total_subscription_from_buffer++;
+            if(subscription_buffer_valid_bit_in_use) {
+              for(auto i:subscription_buffers[c].ready_tasks) {
+                SubscriptionTask task = *i;
+                print_debug_info("Before processing task"+to_string(task.addr)); 
+                if(process_task_from_buffer(task)) {
+                  subscription_buffers[c].erase(task.addr);
+                  total_subscription_from_buffer++;
+                }
+              }
+              subscription_buffers[c].clear_valid_bit();  
+            } else {
+              SubscriptionTask task = subscription_buffers[c].front();
+              if(process_task_from_buffer(task)) {
+                subscription_buffers[c].pop_front();
+                total_subscription_from_buffer++;
+              }
             }
           }
         }
