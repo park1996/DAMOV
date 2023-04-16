@@ -204,6 +204,7 @@ public:
         int hops;
         bool dirty = false;
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type){}
+        SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty){}
         SubscriptionTask(){}
       };
       class LRUUnit;
@@ -241,6 +242,7 @@ public:
           SubscriptionTableEntry(){}
           SubscriptionTableEntry(int vault):vault(vault){}
           SubscriptionTableEntry(int vault, SubscriptionTableEntry::SubscriptionStatus status):vault(vault),status(status){}
+          SubscriptionTableEntry(int vault, SubscriptionTableEntry::SubscriptionStatus status, bool dirty):vault(vault),status(status),dirty(dirty){}
         };
         // Actual data structure for those tables
         unordered_map<long, SubscriptionTableEntry> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
@@ -731,11 +733,12 @@ public:
         list<SubscriptionTask> buffer;
         SubscriptionTable* subscription_table = nullptr;
         bool valid_bit_in_use = false;
+        unordered_map<long, typename list<typename list<SubscriptionTask>::iterator>::iterator> ready_map;
         public:
         list<typename list<SubscriptionTask>::iterator> ready_tasks;
         SubscriptionBuffer(){}
         SubscriptionBuffer(size_t buffer_size, bool valid_bit_in_use):buffer_size(buffer_size), valid_bit_in_use(valid_bit_in_use){}
-        bool is_free()const{return buffer.size() < buffer_size;}
+        bool is_free(long addr)const{return buffer.size() < buffer_size && !has(addr);}
         bool is_not_empty()const{return buffer.size() > 0;}
         bool has(long addr)const{return map.count(addr) > 0;}
         void attach_subscription_table(SubscriptionTable* table) {subscription_table = table;}
@@ -748,14 +751,16 @@ public:
           }
           size_t free_set = subscription_table -> get_set(addr);
           for(auto i = buffer.begin(); i != buffer.end(); i++) {
-            if(subscription_table -> get_set(i -> addr) == free_set){
+            if(subscription_table -> get_set(i -> addr) == free_set && ready_map.count(i-> addr) == 0){
               // cout << "Push " << i -> addr << " into the ready queue" << endl;
               ready_tasks.push_back(i);
+              ready_map[i -> addr] = prev(ready_tasks.end());
             }
           }
         }
         void clear_valid_bit() {
           ready_tasks.clear();
+          ready_map.clear();
         }
         void erase(long addr){
           buffer.erase(map[addr]);
@@ -915,7 +920,7 @@ public:
             unsubscribe_address(req_vault, victim_addr);
           }
           // If we have space, we insert it into the buffer
-          if(subscription_buffers[req_vault].is_free()){
+          if(subscription_buffers[req_vault].is_free(task.addr)){
             total_buffer_successful_insertation++;
             print_debug_info("Pushing task "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" into the buffer at sender");
             subscription_buffers[req_vault].push_back(task);
@@ -955,7 +960,7 @@ public:
           process_subscribe_request(task);
         // If not, but we have some space in the buffer, we insert it into the buffer
         } else {
-          if(subscription_buffers[task.to_vault].is_free()) {
+          if(subscription_buffers[task.to_vault].is_free(task.addr)) {
             total_buffer_successful_insertation++;
             print_debug_info("Pushing task "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" into the buffer at receiver");
             subscription_buffers[task.to_vault].push_back(task);
@@ -1283,6 +1288,7 @@ public:
                 SubscriptionTask task = *i;
                 print_debug_info("Before processing task"+to_string(task.addr)); 
                 if(process_task_from_buffer(task)) {
+                  print_debug_info("Try erase task "+to_string(task.addr));
                   subscription_buffers[c].erase(task.addr);
                   total_subscription_from_buffer++;
                 }
