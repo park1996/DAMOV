@@ -700,6 +700,9 @@ public:
           cout << "We have accessed " << insertions << " times to the counter table " << " and evicted " << evictions << " from it. The number of accesses without eviction is " << (insertions - evictions) << endl;
           cout << "The maximum count we have stored is " << maximum_count << endl;
         }
+        long get_insertions()const {return insertions;}
+        long get_evictions()const {return evictions;}
+        int get_maximum_count()const {return maximum_count;}
       };
       CountTable count_table;
 
@@ -1472,6 +1475,19 @@ public:
         cout << "Total hops travelled by Subscription Table packets: " << total_hops << endl;
         count_table.print_stats();
       }
+      long get_total_memory_accesses()const {return total_memory_accesses;}
+      long get_total_submitted_subscriptions()const {return total_submitted_subscriptions;}
+      long get_total_successful_subscriptions()const {return total_successful_subscriptions;}
+      long get_total_unsuccessful_subscriptions()const {return total_unsuccessful_subscriptions;}
+      long get_total_subscription_from_buffer()const {return total_subscription_from_buffer;}
+      long get_total_unsubscriptions()const {return total_unsubscriptions;}
+      long get_total_resubscriptions()const {return total_resubscriptions;}
+      long get_total_buffer_successful_insertation()const {return total_buffer_successful_insertation;}
+      long get_total_buffer_unsuccessful_insertation()const {return total_buffer_unsuccessful_insertation;}
+      long get_total_hops()const {return total_hops;}
+      long get_count_table_insertions()const{return count_table.get_insertions();}
+      long get_count_table_evictions()const{return count_table.get_evictions();}
+      int get_count_table_maximum_count()const{return count_table.get_maximum_count();}
     };
     
     SubscriptionPrefetcherSet prefetcher_set;
@@ -2418,10 +2434,30 @@ public:
       }
       ofs.close();
       memory_addresses.close();
+      string sub_stats_to_open = application_name+".ramulator.subscription_stats";
+      ofstream sub_stats_ofs(sub_stats_to_open.c_str(), ofstream::out);
       if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
         prefetcher_set.print_stats();
+        sub_stats_ofs << "-----Prefetcher Stats-----" << "\n";
+        sub_stats_ofs << "MemAccesses: " << prefetcher_set.get_total_memory_accesses() << "\n";
+        sub_stats_ofs << "SubmittedSubscriptions: " << prefetcher_set.get_total_submitted_subscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulSubscriptions: " << prefetcher_set.get_total_successful_subscriptions() << "\n";
+        sub_stats_ofs << "Unsuccessful Subscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulSubscriptionFromBuffer: " << prefetcher_set.get_total_subscription_from_buffer() << "\n";
+        sub_stats_ofs << "Unsubscriptions: " << prefetcher_set.get_total_unsubscriptions() << "\n";
+        sub_stats_ofs << "Resubscriptions: " << prefetcher_set.get_total_resubscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_successful_insertation() << "\n";
+        sub_stats_ofs << "UnsuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_unsuccessful_insertation() << "\n";
+        sub_stats_ofs << "SubscriptionPktHopsTravelled: " << prefetcher_set.get_total_hops() << "\n";
+        sub_stats_ofs << "CountTableUpdates: " << prefetcher_set.get_count_table_insertions() << "\n";
+        sub_stats_ofs << "CountTableEvictions: " << prefetcher_set.get_count_table_evictions() << "\n";
+        sub_stats_ofs << "CountTableUpdatesWithoutEviction: " << (prefetcher_set.get_count_table_insertions() - prefetcher_set.get_count_table_evictions()) << "\n";
+        sub_stats_ofs << "CountTableMaxCount: " << prefetcher_set.get_count_table_maximum_count() << "\n";
+        sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
       }
       cout << "Total number of hops travelled: " << total_hops << endl;
+      sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";
+      sub_stats_ofs.close();
     }
 
     long page_allocator(long addr, int coreid) {
