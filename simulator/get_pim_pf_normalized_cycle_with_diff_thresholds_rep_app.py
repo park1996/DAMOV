@@ -27,10 +27,14 @@ def extract_cycle(stat_file_location):
 benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
     "darknet" : ["resnet152_gemm_nn", "yolo_gemm_nn"],
     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
     "ligra" : ["PageRank_edgeMapDenseUSA", "Radii_edgeMapSparseUSA", "Triangle_edgeMapDenseRmat"],
+    "parsec" : ["Fluidaminate_ProcessCollision2MT"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
-    "rodinia" : ["BFS_BFS"], "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+    "rodinia" : ["BFS_BFS"],
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 processor_type_prefix = "pim_prefetch_netoh_"
 baseline_processor_type = "pim_ooo_netoh"

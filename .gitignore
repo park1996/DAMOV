@@ -26,3 +26,6 @@ simulator/execution_statuses*
 simulator-communication-info-patch/
 simulator-communication-info-patch/*
 simulator/output*
+simulator/HPCG*.txt
+simulator/hpcg*.txt
+simulator/out.fluid

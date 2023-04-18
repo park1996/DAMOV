@@ -2,7 +2,7 @@ import os
 import threading
 import time
 
-benchmark_suites = ["chai", "darknet", "hashjoin", "ligra", "phoenix", "polybench", "rodinia", "stream"]
+benchmark_suites = ["chai", "darknet", "hpcg", "hashjoin", "ligra", "phoenix", "parsec", "polybench", "rodinia", "splash2", "stream"]
 #HPCG is included in the representative functions list but requires configuration
 #Parsec is not completely built and neither is splash2 - To be investigated
 generation_script = "scripts/generate_config_files.py"
