@@ -1,6 +1,7 @@
 rodinia,Backprop,layerfoward,PIM_ROOT/rodinia_3.1/openmp/backprop/backprop_layerforward 134217728 THREADS
 rodinia,Backprop,adjustWeights,PIM_ROOT/rodinia_3.1/openmp/backprop/backprop_adjust_weights 134217728 THREADS
 rodinia,BFS,BFS,PIM_ROOT/rodinia_3.1/openmp/bfs/bfs THREADS PIM_ROOT/rodinia_3.1/data/bfs/graph1MW_6.txt
+rodinia,NW,UserAdded,PIM_ROOT/rodinia_3.1/openmp/nw/needle 32768 10 THREADS
 rodinia,CFD,CFD,PIM_ROOT/rodinia_3.1/openmp/cfd/euler3d_cpu PIM_ROOT/rodinia_3.1/data/cfd/fvcorr.domn.193K THREADS
 rodinia,Kmeans,Kmeans,PIM_ROOT/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans_kmeans -n THREADS -i PIM_ROOT/rodinia_3.1/data/kmeans/819200.txt
 rodinia,Kmeans,euclidDist,PIM_ROOT/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans_euclid -n THREADS -i PIM_ROOT/rodinia_3.1/data/kmeans/819200.txt
