@@ -29,3 +29,6 @@ simulator/output*
 simulator/HPCG*.txt
 simulator/hpcg*.txt
 simulator/out.fluid
+simulator/input*/
+simulator/cfg/
+simulator/data/
