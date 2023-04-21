@@ -29,8 +29,8 @@ def mkdir_p(directory):
 def create_pim_prefetch_configs(benchmark, application, function, command):
     version = "prefetch"
     number_of_cores = [32]
-    # postfixes = ["netoh", "memtrace"]
-    postfixes = ["netoh"]
+    postfixes = ["netoh", "memtrace"]
+    # postfixes = ["netoh"]
 
     for cores in number_of_cores:
         for prefetcher_type in prefetcher_types:

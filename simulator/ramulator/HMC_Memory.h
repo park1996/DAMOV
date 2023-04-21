@@ -91,6 +91,7 @@ protected:
 
   long mem_req_count = 0;
   long total_hops = 0;
+  long total_memory_accesses = 0;
   bool num_cores;
   int max_block_col_bits;
 public:
@@ -204,8 +205,10 @@ public:
         int to_vault;
         int hops;
         bool dirty = false;
+        bool from_buffer = false;
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty){}
+        SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty, bool from_buffer):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty),from_buffer(from_buffer){}
         SubscriptionTask(){}
       };
       class LRUUnit;
@@ -646,6 +649,7 @@ public:
         long evictions = 0;
         long insertions = 0;
         uint64_t maximum_count = 0;
+        uint64_t total_count_at_eviction = 0;
         public:
         CountTable(){}
         CountTable(int controllers, size_t size, int counter_bits, int tag_bits):controllers(controllers),counter_table_size(size),counter_bits(counter_bits),tag_bits(tag_bits){initialize();}
@@ -679,9 +683,12 @@ public:
           int index = addr % counter_table_size;
           if(count_tables[req_vault][index].tag != tag){
             // cout << "Inserting " << addr << " address into vault " << req_vault << "'s counter table location " << index << endl;
+            if(count_tables[req_vault][index].tag != 0) {
+              total_count_at_eviction += count_tables[req_vault][index].count;
+              evictions++;
+            }
             count_tables[req_vault][index].tag = tag;
             count_tables[req_vault][index].count = 0;
-            evictions++;
           } else {
             count_tables[req_vault][index].count++;
             if(count_tables[req_vault][index].count >= ((uint64_t)1 << counter_bits)) {
@@ -702,6 +709,8 @@ public:
         }
         long get_insertions()const {return insertions;}
         long get_evictions()const {return evictions;}
+        long get_total_count_at_eviction()const {return total_count_at_eviction;}
+        double get_avg_count_at_eviction()const {return (double)(total_count_at_eviction) / (double)(evictions);}
         int get_maximum_count()const {return maximum_count;}
       };
       CountTable count_table;
@@ -952,7 +961,7 @@ public:
         print_debug_info("After submission, entry "+to_string(task.addr)+" exists in to vault? "+to_string(subscription_tables[task.to_vault].has(task.addr))+" status? "+to_string(subscription_tables[task.to_vault].get_status(task.addr)));
         // Actually put the request into the network
         print_debug_info("We are pushing subscription task from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" with addr "+to_string(task.addr));
-        total_hops += task.hops;
+        total_hops += task.from_buffer ? task.hops : 0;
         task.hops += pending_send[task.from_vault];
         pending.push_back(task);
         pending_send[task.from_vault]+=1;
@@ -983,8 +992,8 @@ public:
             total_buffer_unsuccessful_insertation++;
             print_debug_info("We are pushing SubReqNack task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
             int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
-            total_hops+=hops;
-            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck));
+            total_hops += task.from_buffer ? hops : 0;
+            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck, task.dirty, task.from_buffer));
             pending_send[task.to_vault]+=1;
           }
           long victim_addr = find_victim_for_unsubscription(task.to_vault, task.addr);
@@ -1005,9 +1014,9 @@ public:
           print_debug_info("After submission, entry "+to_string(task.addr)+" exists in to vault? "+to_string(subscription_tables[task.to_vault].has(task.addr))+" status? "+to_string(subscription_tables[task.to_vault].get_status(task.addr))+" To which vault? "+to_string(subscription_tables[task.to_vault][task.addr]));
           // We send the acknowledgement and data through the network
           print_debug_info("We are pushing SubReqAck and SubXfer task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
-          total_hops+=hops*WRITE_LENGTH;
+          total_hops += task.from_buffer ? hops*WRITE_LENGTH : 0;
           pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqAck));
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops*WRITE_LENGTH+pending_send[task.to_vault], SubscriptionTask::Type::SubXfer));
+          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops*WRITE_LENGTH+pending_send[task.to_vault], SubscriptionTask::Type::SubXfer, task.dirty, task.from_buffer));
           pending_send[task.to_vault]+=WRITE_LENGTH;
           // If swap is on, we compute the "mirror" address and swap it
           if(swap) {
@@ -1022,8 +1031,8 @@ public:
             int to_vaule_hops = calculate_hops_travelled(task.from_vault, value_vault);
             // We send acknowledgement to the requester, and ask the vault vault to send the vaule back to the requester
             print_debug_info("We are pushing ResubReq task from "+to_string(task.from_vault)+" to "+to_string(value_vault)+" with addr "+to_string(task.addr));
-            total_hops += to_vaule_hops;
-            pending.push_back(SubscriptionTask(task.addr, task.from_vault, value_vault, to_vaule_hops+pending_send[task.to_vault], SubscriptionTask::Type::ResubReq));
+            total_hops += task.from_buffer ? to_vaule_hops : 0;
+            pending.push_back(SubscriptionTask(task.addr, task.from_vault, value_vault, to_vaule_hops+pending_send[task.to_vault], SubscriptionTask::Type::ResubReq, task.dirty, task.from_buffer));
             pending_send[task.to_vault]+=1;
             if(swap) {
               // In the case of swap, we also return the swapped out data of the original subscriber as it is no longer needed
@@ -1033,8 +1042,8 @@ public:
           // If it is in the process of removal or subscription and we are not in the process of subscribing from or removing to the requester vault, we cannot really subscribe it
           } else if(!subscription_tables[task.to_vault].is_subscribed(task.addr) && subscription_tables[task.to_vault][task.addr] != task.from_vault) {
             print_debug_info("We are pushing SubReqNAck task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
-            total_hops += hops;
-            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck));
+            total_hops += task.from_buffer ? hops : 0;
+            pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck, task.dirty, task.from_buffer));
             pending_send[task.to_vault]+=1;
           }
         }
@@ -1084,13 +1093,16 @@ public:
         if(is_pending_removal) {
           unsubscribe_address(task.to_vault, task.addr);
         } else {
-          total_hops += original_vault_hops;
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, original_vault, original_vault_hops+pending_send[task.to_vault], SubscriptionTask::Type::SubXferAck));
+          total_hops += task.from_buffer ? original_vault_hops : 0;
+          pending.push_back(SubscriptionTask(task.addr, task.to_vault, original_vault, original_vault_hops+pending_send[task.to_vault], SubscriptionTask::Type::SubXferAck, task.dirty, task.from_buffer));
           pending_send[task.to_vault]+=1;
         }
         // If it is resubscription, we also need to notify the from vault (where the data is actually from) to ensure that it can remove that entry from its table
         if(task.type == SubscriptionTask::Type::ResubXfer) {
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::ResubXferAck));
+          if(task.from_buffer) {
+            total_hops += hops > original_vault_hops ? hops - original_vault_hops : 0;
+          }
+          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::ResubXferAck, task.dirty, task.from_buffer));
           if(task.dirty) {
             subscription_tables[task.to_vault].set_dirty(task.addr);
           }
@@ -1221,15 +1233,15 @@ public:
         int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
         // If this entry is anything other than subscribed, we cannot resubscribe it, so we negatively acknowledgement this resubscription request to ask the sender to try later
         if(!subscription_tables[task.to_vault].is_subscribed(task.addr)) {
-          total_hops+=hops;
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck));
+          total_hops += task.from_buffer ? hops : 0;
+          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck, task.dirty, task.from_buffer));
           pending_send[task.to_vault]+=1;
         // Otherwise, we can transfer the data to the current requester
         } else {
           subscription_tables[task.to_vault].submit_resubscription(task.from_vault, task.addr);
-          total_hops+=hops*WRITE_LENGTH;
+          total_hops += task.from_buffer ? hops*WRITE_LENGTH : 0;
           pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::SubReqAck));
-          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops*WRITE_LENGTH+pending_send[task.to_vault], SubscriptionTask::Type::ResubXfer, subscription_tables[task.to_vault].is_dirty(task.addr)));
+          pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops*WRITE_LENGTH+pending_send[task.to_vault], SubscriptionTask::Type::ResubXfer, subscription_tables[task.to_vault].is_dirty(task.addr), task.from_buffer));
           pending_send[task.to_vault]+=WRITE_LENGTH;
         }
       }
@@ -1256,7 +1268,9 @@ public:
           } else if(subscription_tables[task.from_vault].receive_buffer_is_free() && subscription_tables[task.from_vault].subscription_table_is_free(task.addr, required_space)) {
             print_debug_info("Processing task addr "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" with hop "+to_string(task.hops));
             // Then we insert it
-            push_subscribe_request_into_network(task);
+            SubscriptionTask new_task = task;
+            new_task.from_buffer = true;
+            push_subscribe_request_into_network(new_task);
             // And ask the it to be removed
             return true;
           }
@@ -1274,7 +1288,9 @@ public:
           // Check for insertion condition and insert
           else if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space) && (!swap || subscription_tables[task.to_vault].receive_buffer_is_free())) {
             print_debug_info("Processing task addr "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" with hop "+to_string(task.hops));
-            process_subscribe_request(task);
+            SubscriptionTask new_task = task;
+            new_task.from_buffer = true;
+            process_subscribe_request(new_task);
             return true;
           }
         }
@@ -1487,6 +1503,8 @@ public:
       long get_total_hops()const {return total_hops;}
       long get_count_table_insertions()const{return count_table.get_insertions();}
       long get_count_table_evictions()const{return count_table.get_evictions();}
+      long get_count_table_total_count_at_eviction()const{return count_table.get_total_count_at_eviction();}
+      double get_count_table_avg_count_at_eviction()const{return count_table.get_avg_count_at_eviction();}
       int get_count_table_maximum_count()const{return count_table.get_maximum_count();}
     };
     
@@ -1494,6 +1512,14 @@ public:
 
     vector<int> addr_bits;
     vector<vector <int> > address_distribution;
+    vector<vector <int> > address_distribution_r;
+    vector<vector <int> > address_distribution_w;
+    vector<vector <int> > address_distribution_o;
+    vector<long> hops_distribution;
+    vector<long> hops_distribution_r;
+    vector<long> hops_distribution_w;
+    vector<long> hops_distribution_o;
+    vector<long> network_cycle_distribution;
 
     int tx_bits;
 
@@ -1567,11 +1593,25 @@ public:
         num_cores = configs.get_core_num();
         cout << "Number of cores in HMC Memory: " << configs.get_core_num() << endl;
         address_distribution.resize(configs.get_core_num());
+        address_distribution_r.resize(configs.get_core_num());
+        address_distribution_w.resize(configs.get_core_num());
+        address_distribution_o.resize(configs.get_core_num());
+        hops_distribution.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
+        hops_distribution_r.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
+        hops_distribution_w.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
+        hops_distribution_o.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
+        network_cycle_distribution.assign(MAX_HOP, 0);
         for(int i=0; i < configs.get_core_num(); i++){
             //up to 32 vaults
             address_distribution[i].resize(32);
+            address_distribution_r[i].resize(32);
+            address_distribution_w[i].resize(32);
+            address_distribution_o[i].resize(32);
             for(int j=0; j < 32; j++){
                 address_distribution[i][j] = 0;
+                address_distribution_r[i][j] = 0;
+                address_distribution_w[i][j] = 0;
+                address_distribution_o[i][j] = 0;
             }
         }
 
@@ -2202,6 +2242,8 @@ public:
         int subscribed_vault = original_vault;
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           prefetcher_set.access_address(req);
+        } else {
+          total_memory_accesses++;
         }
         int requester_vault = req.coreid;
 
@@ -2253,14 +2295,14 @@ public:
                 }
               }
             }
-            if(network_overhead) {
-              total_hops += hops;
-            }
             req.hops = hops;
 
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
               cout << "We are not able to send request with address " << req.addr << endl;
               return false;
+            }
+            if(network_overhead) {
+              total_hops += hops;
             }
 
             if (req.type == Request::Type::READ) {
@@ -2276,8 +2318,22 @@ public:
             ++incoming_requests_per_channel[req.addr_vec[int(HMC::Level::Vault)]];
             ++mem_req_count;
 
-            if(req.coreid >= 0 && req.coreid < 256)
+            if(req.coreid >= 0 && req.coreid < 256) {
+              network_cycle_distribution[hops]++;
+              int simplified_hops = calculate_hops_travelled(req.coreid, req.addr_vec[int(HMC::Level::Vault)]);
+              hops_distribution[simplified_hops]++;
               address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              if (req.type == Request::Type::WRITE){
+                hops_distribution_w[simplified_hops]++;
+                address_distribution_w[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              } else if (req.type == Request::Type::READ) {
+                hops_distribution_r[simplified_hops]++;
+                address_distribution_r[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              } else{
+                hops_distribution_o[simplified_hops]++;
+                address_distribution_o[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              }
+            }
             else
               cerr << "HMC MEMORY: INVALID CORE ID: " << req.coreid << "endl";
 
@@ -2337,8 +2393,12 @@ public:
               ++incoming_requests_per_channel[req.addr_vec[int(HMC::Level::Vault)]];
               ++mem_req_count;
 
-              if(req.coreid >= 0 && req.coreid < 256)
+              if(req.coreid >= 0 && req.coreid < 256) {
                 address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+                if (req.type == Request::Type::WRITE)       address_distribution_w[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+                else if (req.type == Request::Type::READ)   address_distribution_r[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+                else                                        address_distribution_o[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              }
               else
                 cerr << "HMC MEMORY: INVALID CORE ID: " << req.coreid << "endl";
               return true;
@@ -2423,17 +2483,58 @@ public:
       write_req_queue_length_avg = write_req_queue_length_sum.value() / dram_cycles;
 
       string to_open = application_name+".ramulator.address_distribution";
+      string to_open_r = application_name+".ramulator.address_distribution_r";
+      string to_open_w = application_name+".ramulator.address_distribution_w";
+      string to_open_o = application_name+".ramulator.address_distribution_o";
       cout << "Address distribution stored at: " << to_open << endl;
       cout << "Number of cores: " << num_cores << endl;
       std::ofstream ofs(to_open.c_str(), std::ofstream::out);
       ofs << "CoreID VaultID #Requests\n";
       for(int i=0; i < address_distribution.size(); i++){
-        for(int j=0; j < 32; j++){
+        for(int j=0; j < address_distribution.size(); j++){
           ofs << i << " " << j << " " <<  address_distribution[i][j] << "\n";
         }
       }
       ofs.close();
+      std::ofstream ofs_r(to_open_r.c_str(), std::ofstream::out);
+      ofs_r << "CoreID VaultID #Requests\n";
+      for(int i=0; i < address_distribution_r.size(); i++){
+        for(int j=0; j < address_distribution_r.size(); j++){
+          ofs_r << i << " " << j << " " <<  address_distribution_r[i][j] << "\n";
+        }
+      }
+      ofs_r.close();
+      std::ofstream ofs_w(to_open_w.c_str(), std::ofstream::out);
+      ofs_w << "CoreID VaultID #Requests\n";
+      for(int i=0; i < address_distribution_w.size(); i++){
+        for(int j=0; j < address_distribution_w.size(); j++){
+          ofs_w << i << " " << j << " " <<  address_distribution_w[i][j] << "\n";
+        }
+      }
+      ofs_w.close();
+      std::ofstream ofs_o(to_open_o.c_str(), std::ofstream::out);
+      ofs_o << "CoreID VaultID #Requests\n";
+      for(int i=0; i < address_distribution_o.size(); i++){
+        for(int j=0; j < address_distribution_o.size(); j++){
+          ofs_o << i << " " << j << " " <<  address_distribution_o[i][j] << "\n";
+        }
+      }
+      ofs_o.close();
       memory_addresses.close();
+      string to_open_hops_distribution = application_name+".hops_distribution.csv";
+      ofstream hops_distribution_ofs(to_open_hops_distribution.c_str(), ofstream::out);
+      hops_distribution_ofs << "Hops,Read,Write,Other,Total" << "\n";
+      for(int i = 0; i < NETWORK_WIDTH+NETWORK_HEIGHT; i++) {
+        hops_distribution_ofs << i << "," << hops_distribution_r[i] << "," << hops_distribution_w[i] << "," << hops_distribution_o[i] << "," << hops_distribution[i] << "\n";
+      }
+      hops_distribution_ofs.close();
+      string to_open_network_cycles_distribution = application_name+".network_cycle.csv";
+      ofstream network_cycle_ofs(to_open_network_cycles_distribution.c_str(), ofstream::out);
+      network_cycle_ofs << "Cycle,# Requests\n";
+      for(int i = 0; i < MAX_HOP; i++) {
+        network_cycle_ofs << i << "," << network_cycle_distribution[i] << "\n";
+      }
+      network_cycle_ofs.close();
       string sub_stats_to_open = application_name+".ramulator.subscription_stats";
       ofstream sub_stats_ofs(sub_stats_to_open.c_str(), ofstream::out);
       if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
@@ -2442,7 +2543,7 @@ public:
         sub_stats_ofs << "MemAccesses: " << prefetcher_set.get_total_memory_accesses() << "\n";
         sub_stats_ofs << "SubmittedSubscriptions: " << prefetcher_set.get_total_submitted_subscriptions() << "\n";
         sub_stats_ofs << "SuccessfulSubscriptions: " << prefetcher_set.get_total_successful_subscriptions() << "\n";
-        sub_stats_ofs << "Unsuccessful Subscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
+        sub_stats_ofs << "UnsuccessfulSubscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
         sub_stats_ofs << "SuccessfulSubscriptionFromBuffer: " << prefetcher_set.get_total_subscription_from_buffer() << "\n";
         sub_stats_ofs << "Unsubscriptions: " << prefetcher_set.get_total_unsubscriptions() << "\n";
         sub_stats_ofs << "Resubscriptions: " << prefetcher_set.get_total_resubscriptions() << "\n";
@@ -2451,9 +2552,13 @@ public:
         sub_stats_ofs << "SubscriptionPktHopsTravelled: " << prefetcher_set.get_total_hops() << "\n";
         sub_stats_ofs << "CountTableUpdates: " << prefetcher_set.get_count_table_insertions() << "\n";
         sub_stats_ofs << "CountTableEvictions: " << prefetcher_set.get_count_table_evictions() << "\n";
+        sub_stats_ofs << "CountTableTotalCount: " << prefetcher_set.get_count_table_total_count_at_eviction() << "\n";
+        sub_stats_ofs << "CountTableAvgCount: " << prefetcher_set.get_count_table_avg_count_at_eviction() << "\n";
         sub_stats_ofs << "CountTableUpdatesWithoutEviction: " << (prefetcher_set.get_count_table_insertions() - prefetcher_set.get_count_table_evictions()) << "\n";
         sub_stats_ofs << "CountTableMaxCount: " << prefetcher_set.get_count_table_maximum_count() << "\n";
         sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
+      } else {
+        sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
       }
       cout << "Total number of hops travelled: " << total_hops << endl;
       sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";

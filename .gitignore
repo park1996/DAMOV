@@ -32,3 +32,5 @@ simulator/out.fluid
 simulator/input*/
 simulator/cfg/
 simulator/data/
+simulator/stats_access_by_hops*/
+simulator/stats_access_by_hops*/*
