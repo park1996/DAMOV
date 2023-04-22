@@ -9,10 +9,6 @@ count_thresholds = get_count_thresholds()
 hops_thresholds_str = [""]
 count_thresholds_str = [""]
 debug_tag = "debugoff"
-for hops_threshold in hops_thresholds:
-    hops_thresholds_str.append(str(hops_threshold)+" Hops")
-for count_threshold in count_thresholds:
-    count_thresholds_str.append(str(count_threshold)+" Counts")
 
 def extract_cycle(stat_file_location):
     cycle_val = -1
@@ -119,8 +115,12 @@ with open(output_filename, mode='w') as csv_file:
                 baseline_mem_access = extract_subscription_stats(baseline_sub_stat_file_location, "MemAccesses")
             for prefetcher_type in prefetcher_types:
                 for hops_threshold in hops_thresholds:
+                    prefetcher_policies = ["adaptive"]
+                    for count_threshold in count_thresholds:
+                        prefetcher_policies.append(str(hops_threshold)+"h"+str(count_threshold)+"c")
+                    csv_header = [""]+prefetcher_policies
                     csv_writer.writerow([full_benchmark_name+" with "+prefetcher_type+" prefetcher and "+str(hops_threshold)+" hop threshold"])
-                    csv_writer.writerow(count_thresholds_str)
+                    csv_writer.writerow(csv_header)
                     cycle_line = ["Total Cycle"]
                     normalized_cycle_line = ["Normalized Cycle"]
                     l1_miss_rate_line = ["L1 Miss Rate"]
@@ -145,10 +145,10 @@ with open(output_filename, mode='w') as csv_file:
                     count_table_evic_line = ["Count Table Evictions"]
                     count_table_max_count_line = ["Count Table Max Count"]
                     count_table_avg_count_line = ["Count Table Avg Count"]
-                    for count_threshold in count_thresholds:
+                    for prefetcher_policy in prefetcher_policies:
                         processor_type = processor_type_prefix+prefetcher_type
-                        stat_file_location = os.path.join(stats_folders, processor_type, str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag, core_number, full_benchmark_name+".zsim.out")
-                        sub_stat_file_location = os.path.join(stats_folders, processor_type, str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag, core_number, full_benchmark_name+".ramulator.subscription_stats")
+                        stat_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, core_number, full_benchmark_name+".zsim.out")
+                        sub_stat_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, core_number, full_benchmark_name+".ramulator.subscription_stats")
                         if not os.path.isfile(stat_file_location):
                             cycle_line.append("N/A")
                             normalized_cycle_line.append("N/A")

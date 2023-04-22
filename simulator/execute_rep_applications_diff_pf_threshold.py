@@ -24,7 +24,7 @@ debug_tag = "debugoff"
 
 start_time = datetime.now()
 print "We are starting experiment on "+start_time.strftime("%Y-%m-%d %H:%M:%S")
-maximum_thread = 40
+maximum_thread = 1
 threads = []
 output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -89,24 +89,24 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["Oceanncp_jacobcalc", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or with reduced parallism?)
-# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
-#     "darknet" : ["yolo_gemm_nn"],
-#     "hpcg" : ["HPCG_ComputeSYMGS"],
-#     "phoenix" : ["Linearregression_main"],
-#     "polybench" : ["linear-algebra_doitgen"], 
-#     "splash-2" : ["Radix_slave_sort"],}
-# The following benchmarks are the set complement of the above benchmark
-benchmark_suites_and_benchmarks_functions = {"chai" : ["HSTO_HSTO", "OOPPAD_OOPPAD"],
-    "hashjoin" : ["NPO_probehashtable"],
-    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction"],
-    "ligra" : ["PageRank_edgeMapDenseUSA"],
+benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
+    "darknet" : ["yolo_gemm_nn"],
+    "hpcg" : ["HPCG_ComputeSYMGS"],
     "phoenix" : ["Linearregression_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
-    "splash-2" : ["Oceanncp_jacobcalc"],
-    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+    "polybench" : ["linear-algebra_doitgen"], 
+    "splash-2" : ["Radix_slave_sort"],}
+# The following benchmarks are the set complement of the above benchmark
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["HSTO_HSTO", "OOPPAD_OOPPAD"],
+#     "hashjoin" : ["NPO_probehashtable"],
+#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction"],
+#     "ligra" : ["PageRank_edgeMapDenseUSA"],
+#     "phoenix" : ["Stringmatch_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
+#     "splash-2" : ["Oceanncp_jacobcalc"],
+#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # Following are reserved for test runs of selected benchmarks
 # benchmark_suites_and_benchmarks_functions = {
-#     "polybench" : ["linear-algebra_doitgen"],}
+#         "phoenix" : ["Stringmatch_main"],}
 
 clean_darknet_chai_inputs()
 
@@ -140,6 +140,7 @@ core_numbers = ["32"]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["allocate"]
 for prefetcher_type in prefetcher_types:
+    processor_types.append(processor_type_prefix+prefetcher_type+"/adaptive_"+debug_tag)
     for hops_threshold in hops_thresholds:
         for count_threshold in count_thresholds:
             processor_types.append(processor_type_prefix+prefetcher_type+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag)

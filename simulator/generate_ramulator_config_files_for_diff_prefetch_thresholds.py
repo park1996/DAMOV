@@ -21,19 +21,27 @@ def mkdir_p(directory):
 
 mkdir_p(os.path.join(ramulator_config_dir, "prefetcher"))
 
+def generate_config_file(prefetcher_type, debug_flag, count_threshold, hops_threshold, adapative_flag, policy_name):
+    debug_tag = "DebugOn" if debug_flag == "true" else "DebugOff"
+    output_dir = os.path.join(ramulator_config_dir, "prefetcher", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+policy_name+"-config.cfg")
+    with open(template_dir, "r") as ins:
+        config_file = open(output_dir,"w")
+        for line in ins:
+            line = line.replace("PREFETCHER_TYPE", prefetcher_type)
+            line = line.replace("DEBUG_FLAG", debug_flag)
+            line = line.replace("COUNT_THRESHOLD_NUMBER", count_threshold)
+            line = line.replace("HOPS_THRESHOLD_NUMBER", hops_threshold)
+            line = line.replace("ADAPTIVE_THRESHOLD_FLAG", adapative_flag)
+            config_file.write(line)
+        config_file.close()
+    ins.close()
+
 for hops in hops_thresholds:
     for count in count_thresholds:
         for debug_flag in debug_flags:
             for prefetcher_type in prefetcher_types:
-                debug_tag = "DebugOn" if debug_flag == "true" else "DebugOff"
-                output_dir = os.path.join(ramulator_config_dir, "prefetcher", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+str(hops)+"h"+str(count)+"c-config.cfg")
-                with open(template_dir, "r") as ins:
-                    config_file = open(output_dir,"w")
-                    for line in ins:
-                        line = line.replace("PREFETCHER_TYPE", prefetcher_type)
-                        line = line.replace("DEBUG_FLAG", debug_flag)
-                        line = line.replace("COUNT_THRESHOLD_NUMBER", str(count))
-                        line = line.replace("HOPS_THRESHOLD_NUMBER", str(hops))
-                        config_file.write(line)
-                    config_file.close()
-                ins.close()
+                generate_config_file(prefetcher_type, debug_flag, str(count), str(hops), "false", str(hops)+"h"+str(count)+"c")
+
+for debug_flag in debug_flags:
+    for prefetcher_type in prefetcher_types:
+        generate_config_file(prefetcher_type, debug_flag, "0", "1", "true", "adaptive")

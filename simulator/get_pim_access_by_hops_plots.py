@@ -5,7 +5,6 @@ import matplotlib
 # Use non X-Window engine as we are executing it in terminal
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
-import numpy as np
 from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds, get_debug_flags, get_prefetcher_types
 
 def mkdir_p(directory):
@@ -73,18 +72,19 @@ maximum_plotted_hop = 11
 x_axis = []
 for i in range(0, maximum_plotted_hop+1):
     x_axis.append(str(i))
-maximum_network_cycles = 168
+maximum_network_cycles = 84
 csv_header = [""]
 for i in range(0, maximum_network_cycles+1):
     csv_header.append(str(i))
 
-benchmark_suites_and_benchmarks_functions = {"chai" : ["HSTO_HSTO", "OOPPAD_OOPPAD"],
+benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
+    "darknet" : ["yolo_gemm_nn"],
     "hashjoin" : ["NPO_probehashtable"],
-    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSYMGS"],
     "ligra" : ["PageRank_edgeMapDenseUSA"],
-    "phoenix" : ["Linearregression_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
-    "splash-2" : ["Oceanncp_jacobcalc"],
+    "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
+    "splash-2" : ["Oceanncp_jacobcalc", "Radix_slave_sort"],
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 plt.figure(figsize=(10.5,6))
@@ -100,9 +100,16 @@ def plot_benchmark_requests(title_type_str, output_dir, retrival_function):
             else:
                 access_counts["baseline"] = [0]*(maximum_plotted_hop+1)
             plt.plot(x_axis, access_counts["baseline"], label = "baseline")
-            for hops_threshold in hops_thresholds:
-                for count_threshold in count_thresholds:
-                    for prefetcher_type in prefetcher_types:
+            for prefetcher_type in prefetcher_types:
+                threshold_label = "adaptive"
+                hops_distribution_csv_file_path = os.path.join(stats_folders, processor_type_prefix+prefetcher_type, threshold_label+"_"+debug_tag, core_number, suite+"_"+benchmark_function+".hops_distribution.csv")
+                if os.path.isfile(hops_distribution_csv_file_path):
+                    access_counts[threshold_label] = retrival_function(hops_distribution_csv_file_path)
+                else:
+                    access_counts[threshold_label] = [0]*(maximum_plotted_hop+1)
+                plt.plot(x_axis, access_counts[threshold_label], label = threshold_label)
+                for hops_threshold in hops_thresholds:
+                    for count_threshold in count_thresholds:
                         threshold_label = str(hops_threshold)+"h"+str(count_threshold)+"c"
                         hops_distribution_csv_file_path = os.path.join(stats_folders, processor_type_prefix+prefetcher_type, threshold_label+"_"+debug_tag, core_number, suite+"_"+benchmark_function+".hops_distribution.csv")
                         if os.path.isfile(hops_distribution_csv_file_path):
@@ -133,9 +140,16 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
             if os.path.isfile(baseline_network_cycle_file_path):
                 baseline_row += get_network_cycles(baseline_network_cycle_file_path)
             csv_writer.writerow(baseline_row)
-            for hops_threshold in hops_thresholds:
-                for count_threshold in count_thresholds:
-                    for prefetcher_type in prefetcher_types:
+            for prefetcher_type in prefetcher_types:
+                threshold_label = "adaptive"
+                hops_distribution_csv_file_path = os.path.join(stats_folders, processor_type_prefix+prefetcher_type, threshold_label+"_"+debug_tag, core_number, suite+"_"+benchmark_function+".hops_distribution.csv")
+                current_row = [threshold_label]
+                network_cycle_file_path = os.path.join(stats_folders, processor_type_prefix+prefetcher_type, threshold_label+"_"+debug_tag, core_number, suite+"_"+benchmark_function+".network_cycle.csv")
+                if os.path.isfile(network_cycle_file_path):
+                    current_row += get_network_cycles(network_cycle_file_path)
+                csv_writer.writerow(current_row)
+                for hops_threshold in hops_thresholds:
+                    for count_threshold in count_thresholds:
                         threshold_label = str(hops_threshold)+"h"+str(count_threshold)+"c"
                         current_row = [threshold_label]
                         network_cycle_file_path = os.path.join(stats_folders, processor_type_prefix+prefetcher_type, threshold_label+"_"+debug_tag, core_number, suite+"_"+benchmark_function+".network_cycle.csv")
