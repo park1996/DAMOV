@@ -15,6 +15,7 @@
 #include <array>
 #include <climits>
 #include <bitset>
+#include <algorithm>
 
 using namespace std;
 
@@ -112,12 +113,32 @@ public:
       assert(src_vault >= 0);
       assert(dst_vault >= 0);
       int vault_destination_x = dst_vault/NETWORK_WIDTH;
-      int vault_destination_y = dst_vault%NETWORK_WIDTH;
+      int vault_destination_y = dst_vault%NETWORK_HEIGHT;
 
-      int vault_origin_x = src_vault/NETWORK_HEIGHT;
+      int vault_origin_x = src_vault/NETWORK_WIDTH;
       int vault_origin_y = src_vault%NETWORK_HEIGHT;
 
       int hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
+      assert(hops <= MAX_HOP);
+      return hops;
+    }
+
+    static int calculate_broadcast_hops_travelled(int src_vault) {
+      assert(src_vault >= 0);
+
+      int vault_origin_x = src_vault/NETWORK_WIDTH;
+      int vault_origin_y = src_vault%NETWORK_HEIGHT;
+
+      int min_x = 0;
+      int min_y = 0;
+
+      int max_x = NETWORK_WIDTH - 1;
+      int max_y = NETWORK_HEIGHT - 1;
+
+      int max_x_hops = max(abs(max_x - vault_origin_x), abs(vault_origin_x - min_x));
+      int max_y_hops = max(abs(max_y - vault_origin_y), abs(vault_origin_y - min_y));
+
+      int hops = max_x_hops + max_y_hops;
       assert(hops <= MAX_HOP);
       return hops;
     }
@@ -198,7 +219,9 @@ public:
           ResubReq, // Request a data to be sent from "to_vault" to "from_vault", but does not trigger swap
           ResubXfer, // Actually transfer the data from "from_vault" to "to_vault"
           ResubXferAck, // Acknowledge "ResubXfer"
-          UpdateOnWrite,
+          UpdateOnWrite, // Set dirty bit on write
+          IncThreshold, // Happens in adapative policy. Broadcast to all vaults to increase threshold
+          DecThreshold, // Same as above, but decrease threshold
         } type;
         long addr;
         int from_vault;
@@ -691,8 +714,8 @@ public:
             count_tables[req_vault][index].count = 0;
           } else {
             count_tables[req_vault][index].count++;
-            if(count_tables[req_vault][index].count >= ((uint64_t)1 << counter_bits)) {
-              count_tables[req_vault][index].count = ((uint64_t)1 << counter_bits) - 1;
+            if(count_tables[req_vault][index].count > get_count_upper_limit()) {
+              count_tables[req_vault][index].count = get_count_upper_limit();
             }
             // cout << "Updating " << addr << " in counter table. It now has count " << count_tables[req_vault][index].count << endl;
           }
@@ -712,12 +735,24 @@ public:
         long get_total_count_at_eviction()const {return total_count_at_eviction;}
         double get_avg_count_at_eviction()const {return (double)(total_count_at_eviction) / (double)(evictions);}
         int get_maximum_count()const {return maximum_count;}
+        uint64_t get_count_upper_limit() const{return ((uint64_t)1 << counter_bits) - 1;}
+        uint64_t get_count_lower_limit() const{return 0;}
       };
       CountTable count_table;
 
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
+      uint64_t prefetch_maximum_count_threshold = 0;
+      // Adaptively change the above numbers as the program executes
+      bool adaptive_threshold_changes = false;
+      vector<long> feedbacks;
+      long positive_feedback_threshold = 10000;
+      long negative_feedback_threshold = -10000;
+      long total_positive_feedback = 0;
+      long total_negative_feedback = 0;
+      long total_threshold_increases = 0;
+      long total_threshold_decreases = 0;
 
       // A pointer so we can easily access Memory members
       Memory<HMC, Controller>* mem_ptr = nullptr;
@@ -851,6 +886,28 @@ public:
         prefetch_count_threshold = threshold;
         cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
       }
+      void set_adaptive_threshold_changes(bool flag) {
+        adaptive_threshold_changes = flag;
+        if(adaptive_threshold_changes) {
+          cout << "Adaptive Threshold Change is on" << endl;
+        }
+      }
+      void set_positive_feedback_threshold(long threshold) {
+        // Ignore threshold if the flag is turned off
+        if(adaptive_threshold_changes) {
+          assert(threshold > 0);
+          positive_feedback_threshold = threshold;
+          cout << "Setting Positive Feedback Threshold as " << positive_feedback_threshold << endl;
+        }
+      }
+      void set_negative_feedback_threshold(long threshold) {
+        // Ignore threshold if the flag is turned off
+        if(adaptive_threshold_changes) {
+          assert(threshold < 0);
+          negative_feedback_threshold = threshold;
+          cout << "Setting Negative Feedback Threshold as " << negative_feedback_threshold << endl;
+        }
+      }
       void set_subscription_table_size(size_t size) {
         if(subscription_table_ways == SIZE_MAX){
           subscription_table_ways = size;
@@ -896,6 +953,7 @@ public:
           subscription_buffers[c].attach_subscription_table(&subscription_tables[c]);
         }
         pending_send.assign(controllers, 0);
+        feedbacks.assign(controllers, 0);
       }
       bool check_prefetch(uint64_t hops, uint64_t count) const {
         // TODO: Use machine learning to optimize prefetching
@@ -1351,6 +1409,14 @@ public:
             print_debug_info("Recv UpdateOnWrite from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             update_on_write(task);
             break;
+          case SubscriptionTask::Type::IncThreshold:
+            print_debug_info("Recv IncThreshold from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
+            process_increase_threshold(task);
+            break;
+          case SubscriptionTask::Type::DecThreshold:
+            print_debug_info("Recv DecThreshold from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
+            process_decrease_threshold(task);
+            break;
           default:
             assert(false);
         }
@@ -1477,6 +1543,61 @@ public:
         int req_vault = req.coreid;
         return subscription_tables[req_vault].is_subscribed(addr) || subscription_tables[req_vault].is_pending_removal(addr);
       }
+      void record_positive_feedback(int vault, int hops_diff, int cycles) {
+        if(!adaptive_threshold_changes) {
+          return;
+        }
+        assert(hops_diff >= 0);
+        // cout << "Increasing feedback vaule, from " << feedbacks[vault];
+        feedbacks[vault]+=hops_diff;
+        // cout << " to " << feedbacks[vault] << endl;
+        total_positive_feedback++;
+        if(feedbacks[vault] >= positive_feedback_threshold) {
+          feedbacks[vault] = 0;
+          submit_decrease_threshold(vault, cycles);
+        }
+      }
+      void record_negative_feedback(int vault, int hops_diff, int cycles) {
+        if(!adaptive_threshold_changes) {
+          return;
+        }
+        assert(hops_diff >= 0);
+        // cout << "Decrasing feedback vaule, from " << feedbacks[vault];
+        feedbacks[vault]-=hops_diff;
+        // cout << " to " << feedbacks[vault] << endl; 
+        total_negative_feedback++;
+        if(feedbacks[vault] <= negative_feedback_threshold) {
+          feedbacks[vault] = 0;
+          submit_increase_threshold(vault, cycles);
+        }
+      }
+      void submit_increase_threshold(int vault, int cycles) {
+        // cout << "Broadcasting increase request" << endl;
+        pending.push_back(SubscriptionTask(0, vault, controllers, calculate_broadcast_hops_travelled(vault)+cycles, SubscriptionTask::Type::IncThreshold));
+      }
+      void submit_decrease_threshold(int vault, int cycles) {
+        // cout << "Broadcasting decrease request" << endl;
+        pending.push_back(SubscriptionTask(0, vault, controllers, calculate_broadcast_hops_travelled(vault)+cycles, SubscriptionTask::Type::DecThreshold));
+      }
+      void process_increase_threshold(const SubscriptionTask& task) {
+        if(prefetch_count_threshold < count_table.get_count_upper_limit()) {
+          // cout << "Increasing threshold from " << prefetch_count_threshold;
+          prefetch_count_threshold++;
+          // cout << " to " << prefetch_count_threshold << endl;
+          if(prefetch_count_threshold > prefetch_maximum_count_threshold) {
+            prefetch_maximum_count_threshold = prefetch_count_threshold;
+          }
+          total_threshold_increases++;
+        }
+      }
+      void process_decrease_threshold(const SubscriptionTask& task) {
+        if(prefetch_count_threshold > count_table.get_count_lower_limit()) {
+          // cout << "Decreasing threshold from " << prefetch_count_threshold;
+          prefetch_count_threshold--;
+          // cout << " to " << prefetch_count_threshold << endl;
+          total_threshold_decreases++;
+        }
+      }
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
         cout << "Total memory accesses: " << total_memory_accesses << endl;
@@ -1489,6 +1610,11 @@ public:
         cout << "Total Successful Insertation into the Subscription Buffer: " << total_buffer_successful_insertation << endl;
         cout << "Total Unsuccessful Insertation into the Subscription Buffer: " << total_buffer_unsuccessful_insertation << endl;
         cout << "Total hops travelled by Subscription Table packets: " << total_hops << endl;
+        cout << "Total positive feedbacks: " << total_positive_feedback << endl;
+        cout << "Total negative feedbacks: " << total_negative_feedback << endl;
+        cout << "Total threshold increases: " << total_threshold_increases << endl;
+        cout << "Total threshold decreases: " << total_threshold_decreases << endl;
+        cout << "Maximum count threshold: " << prefetch_maximum_count_threshold << endl;
         count_table.print_stats();
       }
       long get_total_memory_accesses()const {return total_memory_accesses;}
@@ -1506,6 +1632,11 @@ public:
       long get_count_table_total_count_at_eviction()const{return count_table.get_total_count_at_eviction();}
       double get_count_table_avg_count_at_eviction()const{return count_table.get_avg_count_at_eviction();}
       int get_count_table_maximum_count()const{return count_table.get_maximum_count();}
+      long get_total_positive_feedback()const{return total_positive_feedback;}
+      long get_total_negative_feedback()const{return total_negative_feedback;}
+      long get_total_threshold_increases()const{return total_threshold_increases;}
+      long get_total_threshold_decreases()const{return total_threshold_decreases;}
+      long get_prefetch_maximum_count_threshold()const{return prefetch_maximum_count_threshold;}
     };
     
     SubscriptionPrefetcherSet prefetcher_set;
@@ -1660,6 +1791,16 @@ public:
 
         if (configs.contains("print_debug_info")) {
           prefetcher_set.set_debug_flag(configs["print_debug_info"] == "true");
+        }
+
+        if (configs.contains("adaptive_threshold_change")) {
+          prefetcher_set.set_adaptive_threshold_changes(configs["adaptive_threshold_change"] == "true");
+          if (configs.contains("positive_feedback_threshold")) {
+            prefetcher_set.set_positive_feedback_threshold(stol(configs["positive_feedback_threshold"]));
+          }
+          if (configs.contains("negative_feedback_threshold")) {
+            prefetcher_set.set_negative_feedback_threshold(stol(configs["negative_feedback_threshold"]));
+          }
         }
 
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
@@ -2239,13 +2380,17 @@ public:
         // assert(address_vector_to_address(addr_vec) == addr); // Test script to make sure the implementation is correct.
         req.addr_vec = addr_vec;
         int original_vault = req.addr_vec[int(HMC::Level::Vault)];
-        int subscribed_vault = original_vault;
+        int requester_vault = req.coreid;
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           prefetcher_set.access_address(req);
         } else {
           total_memory_accesses++;
         }
-        int requester_vault = req.coreid;
+        int subscribed_vault = req.addr_vec[int(HMC::Level::Vault)];
+        if(subscribed_vault != original_vault) {
+          // cout << "subscribed_vault: " << subscribed_vault << " original_vault: " << original_vault << endl;
+        }
+        
 
         req.arrive_hmc = clk;
 
@@ -2254,16 +2399,19 @@ public:
             //I'm considering 32 vaults. So the 2D mesh will be 36x36
             //To calculate how many hops, check the manhattan distance
             int hops;
+            int no_prefetcher_hops;
             if(!network_overhead) {
               hops = 0;
+              no_prefetcher_hops = 0;
             }
             else if (req.type == Request::Type::READ){
               // If we do not use prefetcher, we calculate hops the traditional way
+              no_prefetcher_hops = calculate_hops_travelled(requester_vault, original_vault, READ_LENGTH);
               if(subscription_prefetcher_type == SubscriptionPrefetcherType::None){
                 // Let's assume 1 Flit = 128 bytes
                 // A read request is 64 bytes
                 // One read request will take = 1 Flit*hops + 5*hops
-                hops = calculate_hops_travelled(requester_vault, subscribed_vault, READ_LENGTH);
+                hops = no_prefetcher_hops;
               } else {
                 hops = 0;
                 if(!prefetcher_set.is_subscribed_or_pending_removal_at_requester_vault(req)) {
@@ -2277,15 +2425,17 @@ public:
               }
             }
             else if (req.type == Request::Type::WRITE){
+              no_prefetcher_hops = calculate_hops_travelled(requester_vault, original_vault, WRITE_LENGTH);
               if(subscription_prefetcher_type != SubscriptionPrefetcherType::None && prefetcher_set.is_subscribed_or_pending_removal_at_requester_vault(req)) {
                 hops = 0;
               } else {
                 // We write to the original vault in any case, and let the original vault determine whether to fowraed it or not
-                hops = calculate_hops_travelled(requester_vault, original_vault, WRITE_LENGTH);
+                hops = no_prefetcher_hops;
               }
             } else {
+              no_prefetcher_hops = calculate_hops_travelled(requester_vault, original_vault, OTHER_LENGTH);
               if(subscription_prefetcher_type == SubscriptionPrefetcherType::None) {
-                hops = calculate_hops_travelled(requester_vault, subscribed_vault, OTHER_LENGTH);
+                hops = no_prefetcher_hops;
               } else {
                 if(prefetcher_set.is_subscribed_or_pending_removal_at_requester_vault(req)) {
                   hops = 0;
@@ -2303,6 +2453,15 @@ public:
             }
             if(network_overhead) {
               total_hops += hops;
+              if(hops > no_prefetcher_hops) {
+                // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
+                prefetcher_set.record_negative_feedback(requester_vault, 10*(hops - no_prefetcher_hops), hops);
+              } else if(hops < no_prefetcher_hops) {
+                // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting positive feedback" << endl;
+                prefetcher_set.record_positive_feedback(requester_vault, 10*(no_prefetcher_hops - hops), hops);
+              } else if(hops == no_prefetcher_hops) {
+                prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
+              }
             }
 
             if (req.type == Request::Type::READ) {
@@ -2556,6 +2715,11 @@ public:
         sub_stats_ofs << "CountTableAvgCount: " << prefetcher_set.get_count_table_avg_count_at_eviction() << "\n";
         sub_stats_ofs << "CountTableUpdatesWithoutEviction: " << (prefetcher_set.get_count_table_insertions() - prefetcher_set.get_count_table_evictions()) << "\n";
         sub_stats_ofs << "CountTableMaxCount: " << prefetcher_set.get_count_table_maximum_count() << "\n";
+        sub_stats_ofs << "TotalPosFeedback: " << prefetcher_set.get_total_positive_feedback() << "\n";
+        sub_stats_ofs << "TotalNegFeedback: " << prefetcher_set.get_total_negative_feedback() << "\n";
+        sub_stats_ofs << "TotalThresholdInc: " << prefetcher_set.get_total_threshold_increases() << "\n";
+        sub_stats_ofs << "TotalThresholdDec: " << prefetcher_set.get_total_threshold_decreases() << "\n";
+        sub_stats_ofs << "MaxCountThreshold: " << prefetcher_set.get_prefetch_maximum_count_threshold() << "\n";
         sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
       } else {
         sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
