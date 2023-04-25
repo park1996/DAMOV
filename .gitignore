@@ -9,3 +9,4 @@
 simulator/zsim_stats*/*
 *.out
 *.csv
+simulator/.vscode/settings.json
