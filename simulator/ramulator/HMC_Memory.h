@@ -665,8 +665,8 @@ public:
         private:
         bool initialized = false;
         size_t counter_table_size = 1024;
-        int counter_bits = 8;
-        int tag_bits = 24;
+        int counter_bits = 6;
+        int tag_bits = 26;
         int controllers;
         vector<vector<CountTableEntry>> count_tables;
         long evictions = 0;
@@ -743,10 +743,15 @@ public:
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
+      vector<uint64_t> prefetch_count_thresholds;
       uint64_t prefetch_maximum_count_threshold = 0;
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
       vector<long> feedbacks;
+      long feedback_bits = 16;
+      // Assuming we are using a 2's comp register with given # of bits to store this info
+      long feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
+      long feedback_minimum = -(feedback_maximum+1);
       long positive_feedback_threshold = 10000;
       long negative_feedback_threshold = -10000;
       long total_positive_feedback = 0;
@@ -954,10 +959,11 @@ public:
         }
         pending_send.assign(controllers, 0);
         feedbacks.assign(controllers, 0);
+        prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
       }
-      bool check_prefetch(uint64_t hops, uint64_t count) const {
+      bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
         // TODO: Use machine learning to optimize prefetching
-        return hops >= prefetch_hops_threshold && count >= prefetch_count_threshold;
+        return hops >= prefetch_hops_threshold && count >= prefetch_count_thresholds[vault];
       }
       long find_mirror_address(int vault, long addr) {
         vector<int> victim_vec = address_to_address_vector(addr);
@@ -1514,14 +1520,14 @@ public:
         uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
         // If the policy says that we should subscribe this address, we subscribe it to the requester's vault so it is closer when accessed in the future
         // We do not subscribe in the case that the original vault has the address pending subscription or removal, or when the subscription is already done to the requester vault
-        if(check_prefetch(hops, count)) {
+        if(check_prefetch(hops, count, req_vault_id)) {
           print_debug_info("Checking subscription at vault "+to_string(req_vault_id)+" and address "+to_string(addr));
           print_debug_info("Is pending subscription? "+to_string(subscription_tables[req_vault_id].is_pending_subscription(addr)));
           print_debug_info("Is pending resubscription? "+to_string(subscription_tables[req_vault_id].is_pending_resubscription(addr)));
           print_debug_info("Is pending removal? "+to_string(subscription_tables[req_vault_id].is_pending_removal(addr)));
           print_debug_info("Is subscribed to "+to_string(req_vault_id)+"?"+to_string(subscription_tables[req_vault_id].is_subscribed(addr, req_vault_id)));
         }
-        if(check_prefetch(hops, count) && !(
+        if(check_prefetch(hops, count, req_vault_id) && !(
             subscription_tables[req_vault_id].is_pending_subscription(addr)
             || subscription_tables[req_vault_id].is_pending_resubscription(addr) 
             || subscription_tables[req_vault_id].is_pending_removal(addr) 
@@ -1573,6 +1579,9 @@ public:
         assert(hops_diff >= 0);
         // cout << "Increasing feedback vaule, from " << feedbacks[vault];
         feedbacks[vault]+=hops_diff;
+        if(feedbacks[vault] > feedback_maximum) {
+          feedbacks[vault] = feedback_maximum;
+        }
         // cout << " to " << feedbacks[vault] << endl;
         total_positive_feedback++;
         if(feedbacks[vault] >= positive_feedback_threshold) {
@@ -1587,6 +1596,9 @@ public:
         assert(hops_diff >= 0);
         // cout << "Decrasing feedback vaule, from " << feedbacks[vault];
         feedbacks[vault]-=hops_diff;
+        if(feedbacks[vault] < feedback_minimum) {
+          feedbacks[vault] = feedback_minimum;
+        }
         // cout << " to " << feedbacks[vault] << endl; 
         total_negative_feedback++;
         if(feedbacks[vault] <= negative_feedback_threshold) {
@@ -1596,27 +1608,27 @@ public:
       }
       void submit_increase_threshold(int vault, int cycles) {
         // cout << "Broadcasting increase request" << endl;
-        pending.push_back(SubscriptionTask(0, vault, controllers, calculate_broadcast_hops_travelled(vault)+cycles, SubscriptionTask::Type::IncThreshold));
+        pending.push_back(SubscriptionTask(0, vault, vault, cycles, SubscriptionTask::Type::IncThreshold));
       }
       void submit_decrease_threshold(int vault, int cycles) {
         // cout << "Broadcasting decrease request" << endl;
-        pending.push_back(SubscriptionTask(0, vault, controllers, calculate_broadcast_hops_travelled(vault)+cycles, SubscriptionTask::Type::DecThreshold));
+        pending.push_back(SubscriptionTask(0, vault, vault, cycles, SubscriptionTask::Type::DecThreshold));
       }
       void process_increase_threshold(const SubscriptionTask& task) {
-        if(prefetch_count_threshold < count_table.get_count_upper_limit()) {
+        if(prefetch_count_thresholds[task.to_vault] < count_table.get_count_upper_limit()) {
           // cout << "Increasing threshold from " << prefetch_count_threshold;
-          prefetch_count_threshold++;
+          prefetch_count_thresholds[task.to_vault]++;
           // cout << " to " << prefetch_count_threshold << endl;
-          if(prefetch_count_threshold > prefetch_maximum_count_threshold) {
-            prefetch_maximum_count_threshold = prefetch_count_threshold;
+          if(prefetch_count_thresholds[task.to_vault] > prefetch_maximum_count_threshold) {
+            prefetch_maximum_count_threshold = prefetch_count_thresholds[task.to_vault];
           }
           total_threshold_increases++;
         }
       }
       void process_decrease_threshold(const SubscriptionTask& task) {
-        if(prefetch_count_threshold > count_table.get_count_lower_limit()) {
+        if(prefetch_count_thresholds[task.to_vault] > count_table.get_count_lower_limit()) {
           // cout << "Decreasing threshold from " << prefetch_count_threshold;
-          prefetch_count_threshold--;
+          prefetch_count_thresholds[task.to_vault]--;
           // cout << " to " << prefetch_count_threshold << endl;
           total_threshold_decreases++;
         }
@@ -2476,15 +2488,15 @@ public:
               return false;
             }
             if(network_overhead) {
-              total_hops += hops;
+              total_hops += req.served_without_hops == 1 ? 0 : hops;
               if(hops > no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
-                prefetcher_set.record_negative_feedback(requester_vault, 10*(hops - no_prefetcher_hops), hops);
+                prefetcher_set.record_negative_feedback(requester_vault, 1, hops);
               } else if(hops < no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting positive feedback" << endl;
-                prefetcher_set.record_positive_feedback(requester_vault, 10*(no_prefetcher_hops - hops), hops);
-              } else if(hops == no_prefetcher_hops) {
                 prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
+              // } else if(hops == no_prefetcher_hops) {
+              //   prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
               }
             }
 
