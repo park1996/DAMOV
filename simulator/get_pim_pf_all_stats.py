@@ -79,12 +79,13 @@ def extract_subscription_stats(stat_file_location, stat_name):
 # Following are all the benchmarks that currently runs
 benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
     "darknet" : ["yolo_gemm_nn"],
-    "hashjoin" : ["NPO_probehashtable"],
-    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSYMGS"],
-    "ligra" : ["PageRank_edgeMapDenseUSA"],
+    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
-    "splash-2" : ["Oceanncp_jacobcalc", "Radix_slave_sort"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+    "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 
 processor_type_prefix = "pim_prefetch_netoh_"

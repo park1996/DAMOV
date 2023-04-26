@@ -81,12 +81,13 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 # Following are all the benchmarks that currently runs
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["yolo_gemm_nn"],
-#     "hashjoin" : ["NPO_probehashtable"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSYMGS"],
-#     "ligra" : ["PageRank_edgeMapDenseUSA"],
+#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
 #     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
-#     "splash-2" : ["Oceanncp_jacobcalc", "Radix_slave_sort"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or with reduced parallism?)
 benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
@@ -97,16 +98,16 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
     "splash-2" : ["Radix_slave_sort"],}
 # The following benchmarks are the set complement of the above benchmark
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["HSTO_HSTO", "OOPPAD_OOPPAD"],
-#     "hashjoin" : ["NPO_probehashtable"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction"],
-#     "ligra" : ["PageRank_edgeMapDenseUSA"],
-#     "phoenix" : ["Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "stencil_convolution-2d"], 
-#     "splash-2" : ["Oceanncp_jacobcalc"],
+#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
+#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+#     "phoenix" : ["Linearregression_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # Following are reserved for test runs of selected benchmarks
-# benchmark_suites_and_benchmarks_functions = {
-#         "phoenix" : ["Stringmatch_main"],}
+
 
 clean_darknet_chai_inputs()
 
