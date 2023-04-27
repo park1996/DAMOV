@@ -76,6 +76,7 @@ network_cycle_csv_output_dir = os.path.join(output_dir, "network_cycle")
 mkdir_p(total_plot_output_dir)
 mkdir_p(read_plot_output_dir)
 mkdir_p(write_plot_output_dir)
+mkdir_p(other_plot_output_dir)
 mkdir_p(network_cycle_csv_output_dir)
 maximum_plotted_hop = 11
 x_axis = []
