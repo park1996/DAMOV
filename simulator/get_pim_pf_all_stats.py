@@ -3,6 +3,7 @@ import os
 import csv
 from datetime import datetime
 from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds
+import numpy
 
 hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
@@ -64,6 +65,21 @@ def extract_subscription_stats(stat_file_location, stat_name):
                 value = int(line.split()[1])
     return value
 
+def extract_per_vault_count(stat_file_location, label):
+    core_number = 32
+    result = [0]*core_number
+    with open(stat_file_location, "r") as csv_file:
+        csv_reader = csv.DictReader(csv_file, delimiter=' ')
+        for row in csv_reader:
+            result[int(row[label])] += int(row["#Requests"])
+    return result
+
+def extract_from_vault_count(stat_file_location):
+    return extract_per_vault_count(stat_file_location, "CoreID")
+
+def extract_to_vault_count(stat_file_location):
+    return extract_per_vault_count(stat_file_location, "VaultID")
+
 # Following are all the benchmark workloads that is currently compiling and available
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["resnet152_gemm_nn", "yolo_gemm_nn"],
@@ -110,46 +126,73 @@ with open(output_filename, mode='w') as csv_file:
                 baseline_l1_cache_miss_rate = extract_l1_miss_rate(baseline_stat_file_location)
             baseline_access_hops = -1
             baseline_mem_access = -1
+            baseline_req_latency = -1
+            baseline_hmc_latency = -1
+            baseline_readq_pending = -1
+            baseline_writeq_pending = -1
             baseline_sub_stat_file_location = os.path.join(stats_folders, baseline_processor_type, core_number, full_benchmark_name+".ramulator.subscription_stats")
             if os.path.isfile(baseline_sub_stat_file_location):
                 baseline_access_hops = extract_subscription_stats(baseline_sub_stat_file_location, "AccessPktHopsTravelled")
                 baseline_mem_access = extract_subscription_stats(baseline_sub_stat_file_location, "MemAccesses")
+                baseline_req_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalRequestLatency")
+                baseline_hmc_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalHMCLatency")
+                baseline_readq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalReadQPending")
+                baseline_writeq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalWriteQPending")   
+            baseline_req_to_vault_mean = -1
+            baseline_req_to_vault_std = -1
+            baseline_req_to_vault_cov = -1
+            baseline_addr_dist_file_location = os.path.join(stats_folders, baseline_processor_type, core_number, full_benchmark_name+".ramulator.address_distribution")
+            if os.path.isfile(baseline_addr_dist_file_location):
+                baseline_accesses_to_vaults = extract_to_vault_count(baseline_addr_dist_file_location)
+                baseline_req_to_vault_mean = numpy.mean(baseline_accesses_to_vaults)
+                baseline_req_to_vault_std = numpy.std(baseline_accesses_to_vaults)
+                baseline_req_to_vault_cov = baseline_req_to_vault_std / baseline_req_to_vault_mean
             for prefetcher_type in prefetcher_types:
                 for hops_threshold in hops_thresholds:
                     prefetcher_policies = ["adaptive"]
                     for count_threshold in count_thresholds:
                         prefetcher_policies.append(str(hops_threshold)+"h"+str(count_threshold)+"c")
-                    csv_header = [""]+prefetcher_policies
+                    csv_header = ["", "baseline"]+prefetcher_policies
                     csv_writer.writerow([full_benchmark_name+" with "+prefetcher_type+" prefetcher and "+str(hops_threshold)+" hop threshold"])
                     csv_writer.writerow(csv_header)
-                    cycle_line = ["Total Cycle"]
-                    normalized_cycle_line = ["Normalized Cycle"]
-                    l1_miss_rate_line = ["L1 Miss Rate"]
-                    normalized_l1_miss_rate_line = ["Normalized L1 Miss Rate"]
-                    access_hops_line = ["Access Pkt Hops"]
-                    normalized_access_hops_line = ["Normalized Access Hops"]
-                    sub_hops_line = ["Subscription Pkt Hops"]
-                    total_hops_line = ["Total Hops"]
-                    normalized_total_hops_line = ["Normalized Total hops"]
-                    mem_access_line = ["Memory Access"]
-                    normalized_memory_access_line = ["Normalized Memory Access"]
-                    access_hops_per_mem_line = ["Access Hops per Mem Access"]
-                    total_hops_per_mem_line = ["Total Hops per Mem Access"]
-                    submitted_sub_per_mem_access_line = ["Submitted Sub per Mem access"]
-                    submitted_subscriptions_line = ["Submitted Subscriptions"]
-                    successful_subscription_line = ["Successful Subscriptions"]
-                    subscription_from_buffer_line = ["Subscription from Buffer"]
-                    unsubscription_line = ["Unsubscriptions"]
-                    resubscription_line = ["Resubscriptions"]
-                    suc_ins_to_buffer_line = ["Successful Ins to Buffer"]
-                    unsuc_ins_to_buffer_line = ["Unsuccessful Ins to Buffer"]
-                    count_table_evic_line = ["Count Table Evictions"]
-                    count_table_max_count_line = ["Count Table Max Count"]
-                    count_table_avg_count_line = ["Count Table Avg Count"]
+                    cycle_line = ["Total Cycle", "N/A" if baseline_cycle == -1 else str(baseline_cycle) ]
+                    normalized_cycle_line = ["Normalized Cycle", "N/A" if baseline_cycle == -1 else str(1)]
+                    l1_miss_rate_line = ["L1 Miss Rate", "N/A" if baseline_l1_cache_miss_rate == -1 else str(baseline_l1_cache_miss_rate)]
+                    normalized_l1_miss_rate_line = ["Normalized L1 Miss Rate", "N/A" if baseline_l1_cache_miss_rate == -1 else str(1)]
+                    access_hops_line = ["Access Pkt Hops", "N/A" if baseline_access_hops == -1 else str(baseline_access_hops)]
+                    normalized_access_hops_line = ["Normalized Access Hops", "N/A" if baseline_access_hops == -1 else str(1)]
+                    sub_hops_line = ["Subscription Pkt Hops", "0"]
+                    total_hops_line = ["Total Hops",  "N/A" if baseline_access_hops == -1 else str(baseline_access_hops)]
+                    normalized_total_hops_line = ["Normalized Total hops", "N/A" if baseline_access_hops == -1 else str(1)]
+                    mem_access_line = ["Memory Access", "N/A" if baseline_mem_access == -1 else str(baseline_mem_access)]
+                    normalized_memory_access_line = ["Normalized Memory Access", "N/A" if baseline_mem_access == -1 else str(1)]
+                    access_hops_per_mem_line = ["Access Hops per Mem Access", "N/A" if baseline_mem_access == -1 or baseline_mem_access == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(baseline_mem_access))]
+                    total_hops_per_mem_line = ["Total Hops per Mem Access", "N/A" if baseline_mem_access == -1 or baseline_mem_access == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(baseline_mem_access))]
+                    submitted_sub_per_mem_access_line = ["Submitted Sub per Mem access", "N/A"]
+                    submitted_subscriptions_line = ["Submitted Subscriptions", "N/A"]
+                    successful_subscription_line = ["Successful Subscriptions", "N/A"]
+                    subscription_from_buffer_line = ["Subscription from Buffer", "N/A"]
+                    unsubscription_line = ["Unsubscriptions", "N/A"]
+                    resubscription_line = ["Resubscriptions", "N/A"]
+                    suc_ins_to_buffer_line = ["Successful Ins to Buffer", "N/A"]
+                    unsuc_ins_to_buffer_line = ["Unsuccessful Ins to Buffer", "N/A"]
+                    count_table_evic_line = ["Count Table Evictions", "N/A"]
+                    count_table_max_count_line = ["Count Table Max Count", "N/A"]
+                    count_table_avg_count_line = ["Count Table Avg Count", "N/A"]
+                    requests_to_vault_mean_line = ["Requests to Each Vault Mean", "N/A" if baseline_req_to_vault_mean == -1 else str(baseline_req_to_vault_mean)]
+                    requests_to_vault_std_line = ["Requests to Each Vault Std. Dev.", "N/A" if baseline_req_to_vault_std == -1 else str(baseline_req_to_vault_std)]
+                    requests_to_vault_cov_line = ["Requests to Each Vault Coe. of Var.", "N/A" if baseline_req_to_vault_cov == -1 else str(baseline_req_to_vault_cov)]
+                    request_latency_line = ["Total Request Latency", "N/A" if baseline_req_latency == -1 else str(baseline_req_latency)]
+                    normalized_req_latency_line = ["Normalized Request Latency", "N/A" if baseline_req_latency == -1 else str(1)]
+                    hmc_latency_line = ["Total HMC Latency", "N/A" if baseline_hmc_latency == -1 else str(baseline_hmc_latency)]
+                    normalized_hmc_latency_line = ["Normalized HMC Latency", "N/A" if baseline_hmc_latency == -1 else str(1)]
+                    readq_pending_line = ["Total Read Queue Pending", "N/A" if baseline_readq_pending == -1 else str(baseline_readq_pending)]
+                    writeq_pending_line = ["Total Write Queue Pending", "N/A" if baseline_writeq_pending == -1 else str(baseline_writeq_pending)]   
                     for prefetcher_policy in prefetcher_policies:
                         processor_type = processor_type_prefix+prefetcher_type
                         stat_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, core_number, full_benchmark_name+".zsim.out")
                         sub_stat_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, core_number, full_benchmark_name+".ramulator.subscription_stats")
+                        addr_dist_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, core_number, full_benchmark_name+".ramulator.address_distribution")
                         if not os.path.isfile(stat_file_location):
                             cycle_line.append("N/A")
                             normalized_cycle_line.append("N/A")
@@ -183,6 +226,12 @@ with open(output_filename, mode='w') as csv_file:
                             count_table_evic_line.append("N/A")
                             count_table_max_count_line.append("N/A")
                             count_table_avg_count_line.append("N/A")
+                            request_latency_line.append("N/A")
+                            normalized_req_latency_line.append("N/A")
+                            hmc_latency_line.append("N/A")
+                            normalized_hmc_latency_line.append("N/A")
+                            readq_pending_line.append("N/A")
+                            writeq_pending_line.append("N/A")
                         else:
                             access_hops = extract_subscription_stats(sub_stat_file_location, "AccessPktHopsTravelled")
                             sub_hops = extract_subscription_stats(sub_stat_file_location, "SubscriptionPktHopsTravelled")
@@ -198,6 +247,10 @@ with open(output_filename, mode='w') as csv_file:
                             count_table_evic = extract_subscription_stats(sub_stat_file_location, "CountTableEvictions")
                             count_table_max = extract_subscription_stats(sub_stat_file_location, "CountTableMaxCount")
                             count_table_total = extract_subscription_stats(sub_stat_file_location, "CountTableTotalCount")
+                            req_latency = extract_subscription_stats(sub_stat_file_location, "TotalRequestLatency")
+                            hmc_latency = extract_subscription_stats(sub_stat_file_location, "TotalHMCLatency")
+                            readq_pending = extract_subscription_stats(sub_stat_file_location, "TotalReadQPending")
+                            writeq_pending = extract_subscription_stats(sub_stat_file_location, "TotalWriteQPending")  
                             access_hops_line.append("N/A" if access_hops == -1 else str(access_hops))
                             normalized_access_hops_line.append("N/A" if access_hops == -1 or baseline_access_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(access_hops)))
                             sub_hops_line.append("N/A" if sub_hops == -1 else str(sub_hops))
@@ -218,6 +271,24 @@ with open(output_filename, mode='w') as csv_file:
                             count_table_evic_line.append("N/A" if count_table_evic == -1 else str(count_table_evic))
                             count_table_max_count_line.append("N/A" if count_table_max == -1 else str(count_table_max))
                             count_table_avg_count_line.append("N/A" if count_table_total == -1 or count_table_evic == 0 or count_table_evic == -1 else str(float(count_table_total)/float(count_table_evic)))
+                            request_latency_line.append("N/A" if req_latency == -1 else str(req_latency))
+                            normalized_req_latency_line.append("N/A" if req_latency == -1 or baseline_req_latency == -1 or baseline_req_latency == 0 else str(float(baseline_req_latency)/float(req_latency)))
+                            hmc_latency_line.append("N/A" if hmc_latency == -1 else str(hmc_latency))
+                            normalized_hmc_latency_line.append("N/A" if hmc_latency == -1 or baseline_hmc_latency == -1 or baseline_hmc_latency == 0 else str(float(baseline_hmc_latency)/float(hmc_latency)))
+                            readq_pending_line.append("N/A" if readq_pending == -1 else str(readq_pending))
+                            writeq_pending_line.append("N/A" if writeq_pending == -1 else str(writeq_pending))
+                        if not os.path.isfile(addr_dist_file_location):
+                            requests_to_vault_mean_line.append("N/A")
+                            requests_to_vault_std_line.append("N/A")
+                            requests_to_vault_cov_line.append("N/A")
+                        else:
+                            accesses_to_vaults = extract_to_vault_count(addr_dist_file_location)
+                            req_to_vault_mean = numpy.mean(accesses_to_vaults)
+                            req_to_vault_std = numpy.std(accesses_to_vaults)
+                            req_to_vault_cov = req_to_vault_std / req_to_vault_mean
+                            requests_to_vault_mean_line.append(str(req_to_vault_mean))
+                            requests_to_vault_std_line.append(str(req_to_vault_std))
+                            requests_to_vault_cov_line.append(str(req_to_vault_cov))
                     csv_writer.writerow(cycle_line)
                     csv_writer.writerow(normalized_cycle_line)
                     csv_writer.writerow(access_hops_line)
@@ -242,6 +313,15 @@ with open(output_filename, mode='w') as csv_file:
                     csv_writer.writerow(count_table_evic_line)
                     csv_writer.writerow(count_table_max_count_line)
                     csv_writer.writerow(count_table_avg_count_line)
+                    csv_writer.writerow(requests_to_vault_mean_line)
+                    csv_writer.writerow(requests_to_vault_std_line)
+                    csv_writer.writerow(requests_to_vault_cov_line)
+                    csv_writer.writerow(request_latency_line)
+                    csv_writer.writerow(normalized_req_latency_line)
+                    csv_writer.writerow(hmc_latency_line)
+                    csv_writer.writerow(normalized_hmc_latency_line)
+                    csv_writer.writerow(readq_pending_line)
+                    csv_writer.writerow(writeq_pending_line)
                 csv_writer.writerow('')
 
 
