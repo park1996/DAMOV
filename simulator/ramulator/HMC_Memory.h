@@ -743,11 +743,13 @@ public:
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
+      uint64_t threshold_change_epoach = 100000;
       vector<uint64_t> prefetch_count_thresholds;
       uint64_t prefetch_maximum_count_threshold = 0;
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
       vector<long> feedbacks;
+      vector<double> normalized_latencies;
       long feedback_bits = 16;
       // Assuming we are using a 2's comp register with given # of bits to store this info
       long feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
@@ -891,6 +893,10 @@ public:
         prefetch_count_threshold = threshold;
         cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
       }
+      void set_threshold_change_epoach(int epoach) {
+        threshold_change_epoach = epoach;
+        cout << "Threshold change epoach: " << threshold_change_epoach << endl;
+      }
       void set_adaptive_threshold_changes(bool flag) {
         adaptive_threshold_changes = flag;
         if(adaptive_threshold_changes) {
@@ -959,6 +965,7 @@ public:
         }
         pending_send.assign(controllers, 0);
         feedbacks.assign(controllers, 0);
+        normalized_latencies.assign(controllers, 1.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
       }
       bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
@@ -1484,6 +1491,21 @@ public:
             pending_send[c]--;
           }
         }
+        // Finally, we try to process threshold changes
+        if(mem_ptr -> clk % threshold_change_epoach == 0 && mem_ptr -> clk > 0) {
+          for(int c = 0; c < controllers; c++) {
+            if(feedbacks[c] > 0) {
+              prefetch_count_thresholds[c]++;
+              total_threshold_increases++;
+              if(prefetch_count_thresholds[c] > prefetch_maximum_count_threshold) {
+                prefetch_maximum_count_threshold = prefetch_count_thresholds[c];
+              }
+            } else if(feedbacks[c] < 0) {
+              prefetch_count_thresholds[c]--;
+              total_threshold_decreases++;
+            }
+          }
+        }
       }
       void pre_process_addr(long& addr) {
         mem_ptr -> clear_lower_bits(addr, mem_ptr -> tx_bits + tailing_zero);
@@ -1515,6 +1537,13 @@ public:
           // Also, we set the address vector's vault to the subscribed vault so it can be sent to the correct vault for processing.
           req.addr_vec[int(HMC::Level::Vault)] = val_vault_id;
         }
+        total_memory_accesses++;
+      }
+      void update_count_table_and_submit_subscription(const Request& req) {
+        int req_vault_id = req.coreid;
+        int val_vault_id = req.addr_vec[int(HMC::Level::Vault)];
+        long addr = req.addr;
+        pre_process_addr(addr);
         // Calculate hops and count for prefetch policy check and implementation
         uint64_t hops = (uint64_t)calculate_hops_travelled(req_vault_id, val_vault_id);
         uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
@@ -1535,7 +1564,6 @@ public:
           // cout << "Address " << addr << " with hop " << hops << " and count " << count << " and originally in vault " << original_vault_id << " meets subscription threshold. We now subscribe it from " << val_vault_id << " to " << req_vault_id << endl;
           subscribe_address(req_vault_id, addr);
         }
-        total_memory_accesses++;
       }
       void process_write_request(const Request& req) {
         if(!dirty_bit_used) {
@@ -1584,10 +1612,10 @@ public:
         }
         // cout << " to " << feedbacks[vault] << endl;
         total_positive_feedback++;
-        if(feedbacks[vault] >= positive_feedback_threshold) {
-          feedbacks[vault] = 0;
-          submit_decrease_threshold(vault, cycles);
-        }
+        // if(feedbacks[vault] >= positive_feedback_threshold) {
+        //   feedbacks[vault] = 0;
+        //   submit_decrease_threshold(vault, cycles);
+        // }
       }
       void record_negative_feedback(int vault, int hops_diff, int cycles) {
         if(!adaptive_threshold_changes) {
@@ -1601,10 +1629,10 @@ public:
         }
         // cout << " to " << feedbacks[vault] << endl; 
         total_negative_feedback++;
-        if(feedbacks[vault] <= negative_feedback_threshold) {
-          feedbacks[vault] = 0;
-          submit_increase_threshold(vault, cycles);
-        }
+        // if(feedbacks[vault] <= negative_feedback_threshold) {
+        //   feedbacks[vault] = 0;
+        //   submit_increase_threshold(vault, cycles);
+        // }
       }
       void submit_increase_threshold(int vault, int cycles) {
         // cout << "Broadcasting increase request" << endl;
@@ -1686,6 +1714,13 @@ public:
     vector<long> hops_distribution_w;
     vector<long> hops_distribution_o;
     vector<long> network_cycle_distribution;
+    struct MemoryAccessCountEntry {
+      int count;
+      int original_vault;
+      MemoryAccessCountEntry(){}
+      MemoryAccessCountEntry(int count, int vault):count(count),original_vault(vault){}
+    };
+    unordered_map<long, MemoryAccessCountEntry> memory_address_count;
 
     int tx_bits;
 
@@ -1758,6 +1793,8 @@ public:
 
         num_cores = configs.get_core_num();
         cout << "Number of cores in HMC Memory: " << configs.get_core_num() << endl;
+        cout << "Read latency of HMC Memory: " << ctrls[0]->channel->spec->read_latency << " cycles" << endl;
+        cout << "Write latency of HMC Memory: " << ctrls[0]->channel->spec->write_latency << " cycles" << endl;
         address_distribution.resize(configs.get_core_num());
         address_distribution_r.resize(configs.get_core_num());
         address_distribution_w.resize(configs.get_core_num());
@@ -1802,6 +1839,10 @@ public:
 
         if (configs.contains("prefetcher_hops_threshold")) {
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
+        }
+
+        if (configs.contains("threshold_change_epoach")) {
+          prefetcher_set.set_threshold_change_epoach(stol(configs["threshold_change_epoach"]));
         }
 
         if (configs.contains("prefetcher_subscription_table_size")) {
@@ -2398,7 +2439,7 @@ public:
 
     bool send(Request req)
     {
-      //  cout << "receive request packets@host controller with address " << req.addr << endl;
+      //  cout << "receive request packets@host controller with address " << req.addr << " from vault " << req.coreid << " at " << clk << endl;
         req._addr = req.addr;
         req.reqid = mem_req_count;
 
@@ -2422,9 +2463,9 @@ public:
           total_memory_accesses++;
         }
         int subscribed_vault = req.addr_vec[int(HMC::Level::Vault)];
-        if(subscribed_vault != original_vault) {
-          // cout << "subscribed_vault: " << subscribed_vault << " original_vault: " << original_vault << endl;
-        }
+        // if(subscribed_vault != original_vault) {
+          // cout << "subscribed_vault: " << subscribed_vault << " original_vault: " << original_vault << " address " << req._addr << endl;
+        // }
         
 
         req.arrive_hmc = clk;
@@ -2455,7 +2496,7 @@ public:
                   // Then the original vault forward this request to the subscribed vault
                   hops += calculate_hops_travelled(original_vault, subscribed_vault);
                   // Then the subscribed vault send the data back to the requester vault
-                  hops += calculate_hops_travelled(subscribed_vault, requester_vault)*DATA_LENGTH;
+                  hops += calculate_hops_travelled(subscribed_vault, requester_vault, DATA_LENGTH);
                 }
               }
             }
@@ -2482,19 +2523,26 @@ public:
               }
             }
             req.hops = hops;
+            if(hops != 0) {
+              // cout << "The # of hops for request with address " << req._addr << " is " << hops << endl; 
+            }
 
             if(!ctrls[req.addr_vec[int(HMC::Level::Vault)]] -> receive(req)){
               cout << "We are not able to send request with address " << req.addr << endl;
               return false;
             }
             if(network_overhead) {
-              total_hops += req.served_without_hops == 1 ? 0 : hops;
-              if(hops > no_prefetcher_hops) {
+              if (subscription_prefetcher_type != SubscriptionPrefetcherType::None && hops != 0) {
+                prefetcher_set.update_count_table_and_submit_subscription(req);
+              }
+              int actual_hops = req.served_without_hops == 1 ? 0 : hops;
+              total_hops += actual_hops;
+              if(actual_hops > no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
-                prefetcher_set.record_negative_feedback(requester_vault, 1, hops);
-              } else if(hops < no_prefetcher_hops) {
+                prefetcher_set.record_negative_feedback(requester_vault, actual_hops-no_prefetcher_hops, actual_hops);
+              } else if(actual_hops < no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting positive feedback" << endl;
-                prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
+                prefetcher_set.record_positive_feedback(requester_vault, no_prefetcher_hops-actual_hops, actual_hops);
               // } else if(hops == no_prefetcher_hops) {
               //   prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
               }
@@ -2512,6 +2560,11 @@ public:
             }
             ++incoming_requests_per_channel[req.addr_vec[int(HMC::Level::Vault)]];
             ++mem_req_count;
+            if(memory_address_count.count(req.addr) == 0) {
+              memory_address_count[req.addr] = MemoryAccessCountEntry(1, original_vault);
+            } else {
+              memory_address_count[req.addr].count++;
+            }
 
             if(req.coreid >= 0 && req.coreid < 256) {
               network_cycle_distribution[hops]++;
@@ -2762,7 +2815,54 @@ public:
       }
       cout << "Total number of hops travelled: " << total_hops << endl;
       sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";
+      long total_latency = 0;
+      long total_hmc_latency = 0;
+      long total_waiting_ready = 0;
+      long total_readq_pending = 0;
+      long total_writeq_pending = 0;
+      long total_otherq_pending = 0;
+      long total_overflow_pending = 0;
+      sub_stats_ofs << "-----Controller Stats-----" << "\n";
+      for(int c = 0; c < ctrls.size(); c++) {
+        sub_stats_ofs << "Controller" << c << "MaxReadQQSize: " << ctrls[c] -> readq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxWriteQQSize: " << ctrls[c] -> writeq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOtherQQSize: " << ctrls[c] -> otherq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOverflowQSize: " << ctrls[c] -> overflow.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxReadQArrivelQSize: " << ctrls[c] -> readq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxWriteQArrivelQSize: " << ctrls[c] -> writeq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOtherQArrivelQSize: " << ctrls[c] -> otherq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOverflowArrivelQSize: " << ctrls[c] -> overflow.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "ReadQPending: " << ctrls[c] -> readq.total_pending_task << "\n";
+        total_readq_pending += ctrls[c] -> readq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "WriteQPending: " << ctrls[c] -> writeq.total_pending_task << "\n";
+        total_writeq_pending += ctrls[c] -> writeq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "OtherQPending: " << ctrls[c] -> otherq.total_pending_task << "\n";
+        total_otherq_pending += ctrls[c] -> otherq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "OverflowPending: " << ctrls[c] -> overflow.total_pending_task << "\n";
+        total_overflow_pending += ctrls[c] -> overflow.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "WaitingReady: " << ctrls[c]->total_cycle_waiting_not_ready_request << "\n";
+        total_waiting_ready += ctrls[c]->total_cycle_waiting_not_ready_request;
+        sub_stats_ofs << "Controller" << c << "RequestLatency: " << ctrls[c]->total_latency << "\n";
+        total_latency += ctrls[c]->total_latency;
+        sub_stats_ofs << "Controller" << c << "HMCLatency: " << ctrls[c]->total_hmc_latency << "\n";
+        total_hmc_latency += ctrls[c]->total_hmc_latency;
+      }
+      sub_stats_ofs << "TotalWaitingReady: " << total_waiting_ready << "\n";
+      sub_stats_ofs << "TotalRequestLatency: " << total_latency << "\n";
+      sub_stats_ofs << "TotalHMCLatency: " << total_hmc_latency << "\n";
+      sub_stats_ofs << "MemoryRequests: " << mem_req_count << "\n";
+      sub_stats_ofs << "TotalReadQPending: " << total_readq_pending << "\n";
+      sub_stats_ofs << "TotalWriteQPending: " << total_writeq_pending << "\n";
+      sub_stats_ofs << "TotalOtherQPending: " << total_otherq_pending << "\n";
+      sub_stats_ofs << "TotalOverflowPending: " << total_overflow_pending << "\n";
+      sub_stats_ofs << "-----End Controller Stats-----" << "\n";  
       sub_stats_ofs.close();
+      string address_access_count_to_open = application_name+".ramulator.address_access_count.csv";
+      ofstream address_access_count_ofs(address_access_count_to_open.c_str(), ofstream::out);
+      address_access_count_ofs << "Address,Original Vault,Count\n";
+      for(auto const& pair : memory_address_count) {
+        address_access_count_ofs << pair.first << "," << pair.second.original_vault << "," << pair.second.count << "\n";
+      }
     }
 
     long page_allocator(long addr, int coreid) {
