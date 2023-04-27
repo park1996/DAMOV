@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <deque>
 #include <fstream>
+#include <iostream>
 #include <list>
 #include <string>
 #include <vector>
@@ -165,21 +166,28 @@ public:
     RowPolicy<HMC>* rowpolicy;  // determines the row-policy (e.g., closed-row vs. open-row)
     RowTable<HMC>* rowtable;  // tracks metadata about rows (e.g., which are open and for how long)
     Refresh<HMC>* refresh;
+    long total_hmc_latency = 0;
+    long total_latency = 0;
+    long total_cycle_waiting_not_ready_request = 0;
 
     struct Queue {
         list<Request> q;
         list<Request> arrivel_q;
+        size_t max_q_size = 0;
+        size_t max_arrivel_size = 0;
+        long total_pending_task = 0;
         unsigned int max = 32; // TODO queue qize
         void set_max(int max) {
           this -> max = max;
           cout << "Queue size is: " << this -> max << endl;
         }
-        unsigned int size() {return q.size();}
+        unsigned int size() {return arrivel_q.size() + q.size();}
         void update(){
           list<Request> tmp;
           for (auto& i : arrivel_q) {
             assert(i.hops <= MAX_HOP);
             if(i.hops == 0){
+              total_pending_task+=q.size();
               q.push_back(i);
               continue;
             }
@@ -187,6 +195,12 @@ public:
             tmp.push_back(i);
           }
           arrivel_q = tmp;
+          if(q.size() > max_q_size) {
+            max_q_size = q.size();
+          }
+          if(arrivel_q.size() > max_arrivel_size) {
+            max_arrivel_size = arrivel_q.size();
+          }
         }
         void arrive(Request& req) {
             if(req.hops == 0) {
@@ -752,6 +766,8 @@ public:
 
             if(pim_mode_enabled){
                 req.depart_hmc = clk;
+                total_hmc_latency += (req.depart_hmc - req.arrive_hmc);
+                total_latency += (req.depart - req.arrive);
                 if (req.type == Request::Type::READ || req.type == Request::Type::WRITE) {
                   req.callback(req);
                   pending.pop_front();
@@ -772,22 +788,30 @@ public:
         /*** 3. Should we schedule writes? ***/
         if (!write_mode) {
             // yes -- write queue is almost full or read queue is empty
-            if (writeq.size() >= int(0.8 * writeq.max) || readq.size() == 0)
+            if ((writeq.size() >= int(0.8 * writeq.max) && writeq.q.size() > 0) || readq.size() == 0){
                 write_mode = true;
+            } 
         }
         else {
             // no -- write queue is almost empty and read queue is not empty
-            if (writeq.size() <= int(0.2 * writeq.max) && readq.size() != 0)
+            if ((writeq.size() <= int(0.2 * writeq.max) || writeq.q.size() == 0) && readq.size() != 0) {
                 write_mode = false;
+            }
+
         }
 
         /*** 4. Find the best command to schedule, if any ***/
         Queue* queue = !write_mode ? &readq : &writeq;
-        if (otherq.size())
+        if (otherq.q.size())
             queue = &otherq;  // "other" requests are rare, so we give them precedence over reads/writes
 
         auto req = scheduler->get_head(queue->q);
         if (req == queue->q.end() || !is_ready(req)) {
+            if(req != queue->q.end()) {
+                if(!is_ready(req)) {
+                    total_cycle_waiting_not_ready_request++;
+                }
+            }
           if (!no_DRAM_latency) {
             // we couldn't find a command to schedule -- let's try to be speculative
             auto cmd = HMC::Command::PRE;
@@ -800,7 +824,6 @@ public:
             return;
           }
         }
-
         if (req->is_first_command) {
           req->is_first_command = false;
           int coreid = req->coreid;
