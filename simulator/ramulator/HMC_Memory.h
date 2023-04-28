@@ -16,6 +16,7 @@
 #include <climits>
 #include <bitset>
 #include <algorithm>
+#include <functional>
 
 using namespace std;
 
@@ -749,7 +750,10 @@ public:
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
       vector<long> feedbacks;
-      vector<double> normalized_latencies;
+      vector<long> latencies_for_current_epoach;
+      vector<int> requests_completed_for_current_epoach;
+      vector<double> previous_avg_latencies;
+      vector<int> last_threshold_change;
       long feedback_bits = 16;
       // Assuming we are using a 2's comp register with given # of bits to store this info
       long feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
@@ -965,8 +969,11 @@ public:
         }
         pending_send.assign(controllers, 0);
         feedbacks.assign(controllers, 0);
-        normalized_latencies.assign(controllers, 1.0);
+        latencies_for_current_epoach.assign(controllers, 0);
+        requests_completed_for_current_epoach.assign(controllers, 0);
+        previous_avg_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
+        last_threshold_change.assign(controllers, 0);
       }
       bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
         // TODO: Use machine learning to optimize prefetching
@@ -1492,18 +1499,60 @@ public:
           }
         }
         // Finally, we try to process threshold changes
-        if(mem_ptr -> clk % threshold_change_epoach == 0 && mem_ptr -> clk > 0) {
+        if(mem_ptr -> clk % threshold_change_epoach == 0 && mem_ptr -> clk > 0 && adaptive_threshold_changes) {
           for(int c = 0; c < controllers; c++) {
+            int new_count_threshold = prefetch_count_thresholds[c];
+            // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
             if(feedbacks[c] > 0) {
-              prefetch_count_thresholds[c]++;
-              total_threshold_increases++;
-              if(prefetch_count_thresholds[c] > prefetch_maximum_count_threshold) {
-                prefetch_maximum_count_threshold = prefetch_count_thresholds[c];
-              }
+              // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
+              new_count_threshold++;
             } else if(feedbacks[c] < 0) {
-              prefetch_count_thresholds[c]--;
-              total_threshold_decreases++;
+              // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
+              new_count_threshold--;
             }
+
+            double current_average_latency = 0;
+            if(requests_completed_for_current_epoach[c]) {
+              current_average_latency = ((double)latencies_for_current_epoach[c]) / ((double)requests_completed_for_current_epoach[c]);
+            }
+            if(previous_avg_latencies[c] > 0) {
+              double magnitude = current_average_latency / previous_avg_latencies[c];
+              // 5% difference = 1 hop change
+              int change = lround((magnitude-1)*80)*(-1)*last_threshold_change[c];
+              // if(change != 0) {
+              //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
+              // }
+              new_count_threshold += change;
+            }
+            previous_avg_latencies[c] = current_average_latency;
+            latencies_for_current_epoach[c] = 0;
+            requests_completed_for_current_epoach[c] = 0;
+
+            if(new_count_threshold < count_table.get_count_lower_limit()) {
+              new_count_threshold = count_table.get_count_lower_limit();
+            }
+            if(new_count_threshold > count_table.get_count_upper_limit()) {
+              new_count_threshold = count_table.get_count_upper_limit();
+            }
+
+            if(new_count_threshold > prefetch_count_thresholds[c]) {
+              // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
+              total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
+              last_threshold_change[c] = 1;
+            } else if(new_count_threshold < prefetch_count_thresholds[c]) {
+              // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
+              total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
+              last_threshold_change[c] = -1;
+            } else {
+              last_threshold_change[c] = 0;
+            }
+
+            if(new_count_threshold > prefetch_maximum_count_threshold) {
+                prefetch_maximum_count_threshold = new_count_threshold;
+            }
+
+            prefetch_count_thresholds[c] = new_count_threshold;
+            // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
           }
         }
       }
@@ -1660,6 +1709,13 @@ public:
           // cout << " to " << prefetch_count_threshold << endl;
           total_threshold_decreases++;
         }
+      }
+      void update_latency(long latency, int from_vault) {
+        if(!adaptive_threshold_changes) {
+          return;
+        }
+        latencies_for_current_epoach[from_vault] += latency;
+        requests_completed_for_current_epoach[from_vault]++;
       }
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
@@ -2188,6 +2244,7 @@ public:
           ctrl->record_write_hits = &record_write_hits;
           ctrl->record_write_misses = &record_write_misses;
           ctrl->record_write_conflicts = &record_write_conflicts;
+          ctrl->attach_parent_update_latency_function(std::bind(&Memory<HMC, Controller>::SubscriptionPrefetcherSet::update_latency, &(this->prefetcher_set), std::placeholders::_1, std::placeholders::_2));
         }
     }
 

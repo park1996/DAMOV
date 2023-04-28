@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <functional>
 #include "Controller.h"
 #include "Scheduler.h"
 
@@ -169,6 +170,7 @@ public:
     long total_hmc_latency = 0;
     long total_latency = 0;
     long total_cycle_waiting_not_ready_request = 0;
+    function<void(long, int)> update_parent_with_latency;
 
     struct Queue {
         list<Request> q;
@@ -768,6 +770,9 @@ public:
                 req.depart_hmc = clk;
                 total_hmc_latency += (req.depart_hmc - req.arrive_hmc);
                 total_latency += (req.depart - req.arrive);
+                if(update_parent_with_latency) {
+                    update_parent_with_latency(req.depart_hmc - req.arrive_hmc, req.coreid);
+                }
                 if (req.type == Request::Type::READ || req.type == Request::Type::WRITE) {
                   req.callback(req);
                   pending.pop_front();
@@ -967,6 +972,10 @@ public:
       (*record_write_hits)[coreid] = (*write_row_hits)[coreid];
       (*record_write_misses)[coreid] = (*write_row_misses)[coreid];
       (*record_write_conflicts)[coreid] = (*write_row_conflicts)[coreid];
+    }
+
+    void attach_parent_update_latency_function(function<void(long, int)> partent_function) {
+        update_parent_with_latency = partent_function;
     }
 
 private:
