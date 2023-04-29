@@ -90,22 +90,31 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or with reduced parallism?)
-benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
-    "darknet" : ["yolo_gemm_nn"],
-    "hpcg" : ["HPCG_ComputeSYMGS"],
-    "phoenix" : ["Linearregression_main"],
-    "polybench" : ["linear-algebra_doitgen"], 
-    "splash-2" : ["Radix_slave_sort"],}
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
+#     "hpcg" : ["HPCG_ComputeSYMGS"],
+#     "phoenix" : ["Linearregression_main"],
+#     "polybench" : ["linear-algebra_doitgen"], }
 # The following benchmarks are the set complement of the above benchmark
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["HSTO_HSTO", "OOPPAD_OOPPAD"],
+#     "darknet" : ["yolo_gemm_nn"],
 #     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
 #     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
 #     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
 #     "phoenix" : ["Linearregression_main"],
 #     "polybench" : ["linear-algebra_3mm", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
 #     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
-#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2"],
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+# The following are benchmarks that impacted by our model
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
+#     "darknet" : ["yolo_gemm_nn"],
+#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded"],
+#     "phoenix" : ["Linearregression_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_fdtd-apml"], 
+#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_laplaccalc", "Radix_slave_sort"], 
+#     "stream" : ["Triad_Triad"]}
 # Following are reserved for test runs of selected benchmarks
 
 
@@ -137,6 +146,7 @@ if "chai" in benchmark_suites_and_benchmarks_functions:
 
 
 processor_types = ["pim_ooo_netoh"] # Include one for baseline
+# processor_types = []
 core_numbers = ["32"]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["allocate"]
