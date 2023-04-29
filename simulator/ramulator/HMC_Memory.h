@@ -1553,7 +1553,7 @@ public:
             if(previous_avg_latencies[c] > 0) {
               double magnitude = current_average_latency / previous_avg_latencies[c];
               // 1/invert_latency_variance_threshold% difference = 1 hop change
-              int change = lround((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
+              int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
               // if(change != 0) {
               //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
               // }
