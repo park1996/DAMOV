@@ -34,3 +34,5 @@ simulator/cfg/
 simulator/data/
 simulator/stats_access_by_hops*/
 simulator/stats_access_by_hops*/*
+simulator/plots_for_paper_*/
+simulator/plots_for_paper_*/*
