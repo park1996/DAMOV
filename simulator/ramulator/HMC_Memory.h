@@ -30,7 +30,7 @@ protected:
   long max_address;
 
   long instruction_counter = 0;
-  bool profile_this_epoach = true;
+  bool profile_this_epoch = true;
   bool get_memory_addresses = false;
   string application_name;
   ofstream memory_addresses;
@@ -257,6 +257,7 @@ public:
         LRUUnit* lru_unit = nullptr;
         LFUUnit* lfu_unit = nullptr;
         SubscriptionBuffer* subscription_buffer = nullptr;
+        int count_threshold = 0;
         struct SubscriptionTableEntry {
           int vault;
           enum SubscriptionStatus {
@@ -276,8 +277,12 @@ public:
         unordered_map<long, SubscriptionTableEntry> address_translation_table; // Subscribe remote address (1st val) to local address (2nd address)
         vector<size_t> virtualized_table_sets; // Used for limiting the number of ways in each "set" in each subscription table
         public:
+        unordered_map<long, int> unused_subscriptions;
         SubscriptionTable(){}
         SubscriptionTable(size_t size, size_t ways, size_t receiving_buffer_size):subscription_table_size(size),subscription_table_ways(ways),receiving_buffer_size(receiving_buffer_size) {initialize();} // Only set from table size
+        void propogate_count_threshold(int threshold) {
+          count_threshold = threshold;
+        }
         void set_subscription_table_size(size_t size) {
           subscription_table_size = size;
           // If we have not set the table ways, we make it fully associative to prevent any issues
@@ -342,6 +347,7 @@ public:
           assert(virtualized_table_sets[get_set(addr)] <= subscription_table_ways);
           insert_lru_lfu(addr);
           address_translation_table.insert({addr, SubscriptionTableEntry(req_vault, SubscriptionTableEntry::SubscriptionStatus::PendingSubscription)});
+          unused_subscriptions[addr] = 0;
         }
         void update_valid_bit(long addr){
           if(subscription_buffer != nullptr){
@@ -425,6 +431,7 @@ public:
         void remove_table_entry(long addr) {
           if(has(addr)) {
             erase_lfu_lru(addr);
+            unused_subscriptions.erase(addr);
             // Actually remove the address from the table
             address_translation_table.erase(addr);
             // Decrease the "virtual" set's content count for subscription from the original vault
@@ -490,7 +497,14 @@ public:
           }
           return false;
         }
-        int& operator[](const long& addr){return address_translation_table[addr].vault;}
+        int& operator[](const long& addr){
+          return address_translation_table[addr].vault;
+          if(unused_subscriptions[addr] >= 0) {
+            unused_subscriptions.erase(addr);
+          } else {
+            unused_subscriptions[addr]++;
+          }
+        }
         size_t count(long addr) const{return address_translation_table.count(addr);}
       };
       vector<SubscriptionTable> subscription_tables;
@@ -744,14 +758,16 @@ public:
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
-      uint64_t threshold_change_epoach = 100000;
+      uint64_t threshold_change_epoch = 100000;
       vector<uint64_t> prefetch_count_thresholds;
       uint64_t prefetch_maximum_count_threshold = 0;
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
+      bool bimodel_adaptive_on = true;
+      int invert_latency_variance_threshold = 40;
       vector<long> feedbacks;
-      vector<long> latencies_for_current_epoach;
-      vector<int> requests_completed_for_current_epoach;
+      vector<long> latencies_for_current_epoch;
+      vector<int> requests_completed_for_current_epoch;
       vector<double> previous_avg_latencies;
       vector<int> last_threshold_change;
       long feedback_bits = 16;
@@ -897,20 +913,34 @@ public:
         prefetch_count_threshold = threshold;
         cout << "Prefetcher count threshold: " << prefetch_count_threshold << endl;
       }
-      void set_threshold_change_epoach(int epoach) {
-        threshold_change_epoach = epoach;
-        cout << "Threshold change epoach: " << threshold_change_epoach << endl;
+      void set_threshold_change_epoch(int epoch) {
+        threshold_change_epoch = epoch;
+        cout << "Threshold change epoch: " << threshold_change_epoch << endl;
       }
       void set_adaptive_threshold_changes(bool flag) {
         adaptive_threshold_changes = flag;
         if(adaptive_threshold_changes) {
           cout << "Adaptive Threshold Change is on" << endl;
+        } else {
+          cout << "Adaptive Threshold Change is off" << endl;
+        }
+      }
+      void set_invert_latency_variance_threshold(int threshold) {
+        invert_latency_variance_threshold = threshold;
+        cout << "Invert latency variance threshold: " << invert_latency_variance_threshold << endl;
+      }
+      void set_bimodel_adaptive(bool flag) {
+        bimodel_adaptive_on = flag;
+        if(bimodel_adaptive_on) {
+          cout << "Bimodel Adaptive is on" << endl;
+        } else {
+          cout << "Bimodel Adaptive is off" << endl;
         }
       }
       void set_positive_feedback_threshold(long threshold) {
         // Ignore threshold if the flag is turned off
         if(adaptive_threshold_changes) {
-          assert(threshold > 0);
+          assert(threshold >= 0);
           positive_feedback_threshold = threshold;
           cout << "Setting Positive Feedback Threshold as " << positive_feedback_threshold << endl;
         }
@@ -918,7 +948,7 @@ public:
       void set_negative_feedback_threshold(long threshold) {
         // Ignore threshold if the flag is turned off
         if(adaptive_threshold_changes) {
-          assert(threshold < 0);
+          assert(threshold <= 0);
           negative_feedback_threshold = threshold;
           cout << "Setting Negative Feedback Threshold as " << negative_feedback_threshold << endl;
         }
@@ -969,11 +999,14 @@ public:
         }
         pending_send.assign(controllers, 0);
         feedbacks.assign(controllers, 0);
-        latencies_for_current_epoach.assign(controllers, 0);
-        requests_completed_for_current_epoach.assign(controllers, 0);
+        latencies_for_current_epoch.assign(controllers, 0);
+        requests_completed_for_current_epoch.assign(controllers, 0);
         previous_avg_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
         last_threshold_change.assign(controllers, 0);
+        for(int c = 0; c < controllers; c++) {
+          subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
+        }
       }
       bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
         // TODO: Use machine learning to optimize prefetching
@@ -1499,34 +1532,36 @@ public:
           }
         }
         // Finally, we try to process threshold changes
-        if(mem_ptr -> clk % threshold_change_epoach == 0 && mem_ptr -> clk > 0 && adaptive_threshold_changes) {
+        if(mem_ptr -> clk % threshold_change_epoch == 0 && mem_ptr -> clk > 0 && adaptive_threshold_changes) {
           for(int c = 0; c < controllers; c++) {
             int new_count_threshold = prefetch_count_thresholds[c];
             // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
-            if(feedbacks[c] > 0) {
-              // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
-              new_count_threshold++;
-            } else if(feedbacks[c] < 0) {
-              // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
-              new_count_threshold--;
+            if(previous_avg_latencies[c] == 0 || bimodel_adaptive_on) {
+              if(feedbacks[c] > positive_feedback_threshold) {
+                // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
+                new_count_threshold++;
+              } else if(feedbacks[c] < negative_feedback_threshold) {
+                // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
+                new_count_threshold--;
+              }              
             }
 
             double current_average_latency = 0;
-            if(requests_completed_for_current_epoach[c]) {
-              current_average_latency = ((double)latencies_for_current_epoach[c]) / ((double)requests_completed_for_current_epoach[c]);
+            if(requests_completed_for_current_epoch[c]) {
+              current_average_latency = ((double)latencies_for_current_epoch[c]) / ((double)requests_completed_for_current_epoch[c]);
             }
             if(previous_avg_latencies[c] > 0) {
               double magnitude = current_average_latency / previous_avg_latencies[c];
-              // 5% difference = 1 hop change
-              int change = lround((magnitude-1)*80)*(-1)*last_threshold_change[c];
+              // 1/invert_latency_variance_threshold% difference = 1 hop change
+              int change = lround((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
               // if(change != 0) {
               //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
               // }
               new_count_threshold += change;
             }
             previous_avg_latencies[c] = current_average_latency;
-            latencies_for_current_epoach[c] = 0;
-            requests_completed_for_current_epoach[c] = 0;
+            latencies_for_current_epoch[c] = 0;
+            requests_completed_for_current_epoch[c] = 0;
 
             if(new_count_threshold < count_table.get_count_lower_limit()) {
               new_count_threshold = count_table.get_count_lower_limit();
@@ -1551,7 +1586,12 @@ public:
                 prefetch_maximum_count_threshold = new_count_threshold;
             }
 
+            for(auto addr:subscription_tables[c].unused_subscriptions) {
+              unsubscribe_address(c, addr.first);
+            }
+
             prefetch_count_thresholds[c] = new_count_threshold;
+            subscription_tables[c].propogate_count_threshold(new_count_threshold);
             // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
           }
         }
@@ -1714,8 +1754,8 @@ public:
         if(!adaptive_threshold_changes) {
           return;
         }
-        latencies_for_current_epoach[from_vault] += latency;
-        requests_completed_for_current_epoach[from_vault]++;
+        latencies_for_current_epoch[from_vault] += latency;
+        requests_completed_for_current_epoch[from_vault]++;
       }
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
@@ -1897,8 +1937,8 @@ public:
           prefetcher_set.set_prefetch_hops_threshold(stoi(configs["prefetcher_hops_threshold"]));
         }
 
-        if (configs.contains("threshold_change_epoach")) {
-          prefetcher_set.set_threshold_change_epoach(stol(configs["threshold_change_epoach"]));
+        if (configs.contains("threshold_change_epoch")) {
+          prefetcher_set.set_threshold_change_epoch(stol(configs["threshold_change_epoch"]));
         }
 
         if (configs.contains("prefetcher_subscription_table_size")) {
@@ -1932,6 +1972,12 @@ public:
           }
           if (configs.contains("negative_feedback_threshold")) {
             prefetcher_set.set_negative_feedback_threshold(stol(configs["negative_feedback_threshold"]));
+          }
+          if (configs.contains("invert_latency_variance_threshold")) {
+            prefetcher_set.set_invert_latency_variance_threshold(stol(configs["invert_latency_variance_threshold"]));
+          }
+          if (configs.contains("bimodel_adaptive")) {
+            prefetcher_set.set_bimodel_adaptive(configs["bimodel_adaptive"] == "true");
           }
         }
 
@@ -2643,7 +2689,7 @@ public:
               cerr << "HMC MEMORY: INVALID CORE ID: " << req.coreid << "endl";
 
             if(get_memory_addresses){
-              if (profile_this_epoach){
+              if (profile_this_epoch){
                 memory_addresses << clk << " " << req.addr << " ";
                 if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
                 else if (req.type == Request::Type::READ)   memory_addresses << "R ";
@@ -2654,14 +2700,14 @@ public:
 
                 instruction_counter++;
                 if(instruction_counter >= 10000){
-                  profile_this_epoach = false;
+                  profile_this_epoch = false;
                   instruction_counter = 0;
                 }
               }
               else{
                 instruction_counter++;
                 if(instruction_counter >= 990000){
-                  profile_this_epoach = true;
+                  profile_this_epoch = true;
                   instruction_counter = 0;
                 }
               }
@@ -2715,7 +2761,7 @@ public:
 
         if(get_memory_addresses){
           cout << "Get memory address \n";
-          if (profile_this_epoach){
+          if (profile_this_epoch){
 
             memory_addresses << clk << " " << req.addr << " ";
             if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
@@ -2727,14 +2773,14 @@ public:
 
             instruction_counter++;
             if(instruction_counter >= 10000){
-              profile_this_epoach = false;
+              profile_this_epoch = false;
               instruction_counter = 0;
             }
           }
           else{
             instruction_counter++;
             if(instruction_counter >= 990000){
-              profile_this_epoach = true;
+              profile_this_epoch = true;
               instruction_counter = 0;
             }
           }
