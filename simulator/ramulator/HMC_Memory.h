@@ -1003,7 +1003,7 @@ public:
         requests_completed_for_current_epoch.assign(controllers, 0);
         previous_avg_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
-        last_threshold_change.assign(controllers, 0);
+        last_threshold_change.assign(controllers, -1);
         for(int c = 0; c < controllers; c++) {
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
@@ -1554,6 +1554,7 @@ public:
               double magnitude = current_average_latency / previous_avg_latencies[c];
               // 1/invert_latency_variance_threshold% difference = 1 hop change
               int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
+              // cout << "The magnitude is " << magnitude << " our last change is " << last_threshold_change[c] << endl;
               // if(change != 0) {
               //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
               // }
@@ -1563,23 +1564,23 @@ public:
             latencies_for_current_epoch[c] = 0;
             requests_completed_for_current_epoch[c] = 0;
 
-            if(new_count_threshold < count_table.get_count_lower_limit()) {
-              new_count_threshold = count_table.get_count_lower_limit();
+            if(new_count_threshold < (int)count_table.get_count_lower_limit()) {
+              // cout << "Pending new count threshold is " << new_count_threshold << " and it is lower than the lower limit of " << count_table.get_count_lower_limit() << endl;
+              new_count_threshold = (int)count_table.get_count_lower_limit();
             }
-            if(new_count_threshold > count_table.get_count_upper_limit()) {
-              new_count_threshold = count_table.get_count_upper_limit();
+            if(new_count_threshold > (int)count_table.get_count_upper_limit()) {
+              // cout << "Pending new count threshold is " << new_count_threshold << " and it is higher than the higher limit of " << count_table.get_count_upper_limit() << endl;
+              new_count_threshold = (int)count_table.get_count_upper_limit();
             }
 
             if(new_count_threshold > prefetch_count_thresholds[c]) {
               // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
               total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
               last_threshold_change[c] = 1;
-            } else if(new_count_threshold < prefetch_count_thresholds[c]) {
+            } else if(new_count_threshold < prefetch_count_thresholds[c] || new_count_threshold == 0) {
               // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
               total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
               last_threshold_change[c] = -1;
-            } else {
-              last_threshold_change[c] = 0;
             }
 
             if(new_count_threshold > prefetch_maximum_count_threshold) {
