@@ -187,7 +187,6 @@ public:
         void update(){
           list<Request> tmp;
           for (auto& i : arrivel_q) {
-            assert(i.hops <= MAX_HOP);
             if(i.hops == 0){
               total_pending_task+=q.size();
               q.push_back(i);
@@ -225,7 +224,6 @@ public:
         void update(){
           deque<Request> tmp;
           for (auto& i : arrivel_q) {
-            assert(i.hops <= MAX_HOP);
             if(i.hops == 0){
               q.push_back(i);
               continue;
@@ -236,7 +234,6 @@ public:
           arrivel_q = tmp;
         }
         void arrive(Request& req) {
-            assert(req.hops <= MAX_HOP);
             if(req.hops == 0) {
                 q.push_back(req);
             } else {

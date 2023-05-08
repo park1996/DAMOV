@@ -39,3 +39,16 @@ def get_debug_flags():
 def get_prefetcher_types():
     # return ["Allocate", "Swap"]
     return ["Allocate"]
+
+def get_core_numbers():
+    return [1, 4, 16, 32, 64, 256]
+
+def get_core_to_mem_config():
+    core_config = {1:"HMC_128MB_va1",
+               4:"HMC_512MB_va4",
+               16:"HMC_2GB_va16",
+               32:"HMC_4GB",
+               64:"HMC_8GB_va64",
+               128:"HMC_16GB_va128",
+               256:"HMC_32GB_va256"}
+    return core_config

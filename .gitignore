@@ -20,6 +20,8 @@ simulator/libconfig/*
 simulator/libconfig/*/*
 simulator/ramulator-configs/prefetcher*/*
 simulator/ramulator-configs/prefetcher*/
+simulator/ramulator-configs/pim*/*
+simulator/ramulator-configs/pim*/
 .vscode
 .vscode/*
 simulator/execution_statuses*
@@ -34,5 +36,11 @@ simulator/cfg/
 simulator/data/
 simulator/stats_access_by_hops*/
 simulator/stats_access_by_hops*/*
+simulator/stats_archive*/
+simulator/stats_archive*/*
+simulator/stats_plots*/
+simulator/stats_plots*/*
 simulator/plots_for_paper_*/
 simulator/plots_for_paper_*/*
+simulator/archived_*/
+simulator/archived_*/*

@@ -2,7 +2,7 @@
 import sys
 import os
 import errno
-from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds, get_debug_flags, get_prefetcher_types
+from batch_prefetcher_generator import get_hops_thresholds, get_count_thresholds, get_debug_flags, get_prefetcher_types, get_core_numbers
 
 hops_thresholds = get_hops_thresholds()
 count_thresholds = get_count_thresholds()
@@ -28,7 +28,7 @@ def mkdir_p(directory):
 
 def create_pim_prefetch_configs(benchmark, application, function, command):
     version = "prefetch"
-    number_of_cores = [32]
+    number_of_cores = get_core_numbers()
     postfixes = ["netoh", "memtrace"]
     prefetch_policy_names = ["adaptive"]
     for hops_threshold in hops_thresholds:
@@ -63,9 +63,9 @@ def create_pim_prefetch_configs(benchmark, application, function, command):
                                 line = line.replace("COMMAND_STRING", "\"" + command + "\";")
                                 line = line.replace("THREADS", str(cores))
                                 line = line.replace("PIM_ROOT",PIM_ROOT)
-                                line = line.replace("RAMULATOR_CONFIG_FILENAME", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+prefetcher_policy_name+"-config.cfg")
+                                line = line.replace("RAMULATOR_CONFIG_FILENAME", "HMC-SubscriptionPF-"+prefetcher_type+"-"+debug_tag+"-"+prefetcher_policy_name+"-va"+str(cores)+"-config.cfg")
                                 line = line.replace("RECORD_MEMORY_TRACE_SWITCH", "true" if postfix == "memtrace" else "false")
-
+                                line = line.replace("gmMBytes = 8192;", "gmMBytes = "+str(128*cores)+";")
                                 config_file.write(line)
                             config_file.close()
                         ins.close()

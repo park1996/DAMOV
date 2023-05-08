@@ -96,51 +96,54 @@ protected:
   long total_memory_accesses = 0;
   bool num_cores;
   int max_block_col_bits;
+  int network_width = 6;
+  int network_height = 6;
+  int max_hops = 70;
 public:
     long clk = 0;
     bool pim_mode_enabled = false;
     bool network_overhead = false;
 
-    static int calculate_hops_travelled(int src_vault, int dst_vault, int length) {
+    int calculate_hops_travelled(int src_vault, int dst_vault, int length) {
       assert(src_vault >= 0);
       assert(dst_vault >= 0);
       assert(length > 0);
       int hops = calculate_hops_travelled(src_vault, dst_vault)*length;
-      assert(hops <= MAX_HOP);
+      assert(hops <= max_hops);
       return hops;
     }
 
-    static int calculate_hops_travelled(int src_vault, int dst_vault) {
+    int calculate_hops_travelled(int src_vault, int dst_vault) {
       assert(src_vault >= 0);
       assert(dst_vault >= 0);
-      int vault_destination_x = dst_vault/NETWORK_WIDTH;
-      int vault_destination_y = dst_vault%NETWORK_WIDTH;
+      int vault_destination_x = dst_vault/network_width;
+      int vault_destination_y = dst_vault%network_width;
 
-      int vault_origin_x = src_vault/NETWORK_WIDTH;
-      int vault_origin_y = src_vault%NETWORK_WIDTH;
+      int vault_origin_x = src_vault/network_width;
+      int vault_origin_y = src_vault%network_width;
 
       int hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
-      assert(hops <= MAX_HOP);
+      assert(hops <= max_hops);
       return hops;
     }
 
-    static int calculate_broadcast_hops_travelled(int src_vault) {
+    int calculate_broadcast_hops_travelled(int src_vault) {
       assert(src_vault >= 0);
 
-      int vault_origin_x = src_vault/NETWORK_WIDTH;
-      int vault_origin_y = src_vault%NETWORK_WIDTH;
+      int vault_origin_x = src_vault/network_width;
+      int vault_origin_y = src_vault%network_width;
 
       int min_x = 0;
       int min_y = 0;
 
-      int max_x = NETWORK_WIDTH - 1;
-      int max_y = NETWORK_WIDTH - 1;
+      int max_x = network_width - 1;
+      int max_y = network_width - 1;
 
       int max_x_hops = max(abs(max_x - vault_origin_x), abs(vault_origin_x - min_x));
       int max_y_hops = max(abs(max_y - vault_origin_y), abs(vault_origin_y - min_y));
 
       int hops = max_x_hops + max_y_hops;
-      assert(hops <= MAX_HOP);
+      assert(hops <= max_hops);
       return hops;
     }
 
@@ -864,6 +867,7 @@ public:
       bool dirty_bit_used = true; // EXPERIMENTAL FLAG - Use dirty bit that changes to true when writing to a memory location, and when a subscription table entry is not dirty it will just send a notification instead of the full package on unsubscription
     public:
       explicit SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
+        cout << "Initialize subscription table with " << controllers << " vaults." << endl;
         tailing_zero = mem_ptr -> tx_bits + 1;
         count_table.set_controllers(controllers);
       }
@@ -1024,7 +1028,7 @@ public:
         int required_space = swap ? 2 : 1;
         // Calculate vaules needed for next steps
         int original_vault = find_original_vault_of_address(addr);
-        int hops = calculate_hops_travelled(req_vault, original_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(req_vault, original_vault);
         // Generate a "Subscription Request" task
         SubscriptionTask task = SubscriptionTask(addr, req_vault, original_vault, hops, SubscriptionTask::Type::SubReq);
         // cout << "SubReq task generated from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
@@ -1105,7 +1109,7 @@ public:
           } else {
             total_buffer_unsuccessful_insertation++;
             print_debug_info("We are pushing SubReqNack task from "+to_string(task.to_vault)+" to "+to_string(task.from_vault)+" with addr "+to_string(task.addr));
-            int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
+            int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault);
             total_hops += task.from_buffer ? hops : 0;
             pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck, task.dirty, task.from_buffer));
             pending_send[task.to_vault]+=1;
@@ -1119,7 +1123,7 @@ public:
       void process_subscribe_request(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::SubReq);
         // We calculate how many hops it required to transfer the data
-        int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault);
         // If this address is not currently subscribed anywhere, we insert the subscription request into the table, and allocate space in receiving buffer for receiving swapped out address
         if(!subscription_tables[task.to_vault].has(task.addr)){
           print_debug_info("Submitting address "+to_string(task.addr)+" from "+to_string(task.from_vault)+" into "+to_string(task.to_vault));
@@ -1143,7 +1147,7 @@ public:
         } else {
           if(subscription_tables[task.to_vault].is_subscribed(task.addr)){
             int value_vault = subscription_tables[task.to_vault][task.addr];
-            int to_vaule_hops = calculate_hops_travelled(task.from_vault, value_vault);
+            int to_vaule_hops = mem_ptr -> calculate_hops_travelled(task.from_vault, value_vault);
             // We send acknowledgement to the requester, and ask the vault vault to send the vaule back to the requester
             print_debug_info("We are pushing ResubReq task from "+to_string(task.from_vault)+" to "+to_string(value_vault)+" with addr "+to_string(task.addr));
             total_hops += task.from_buffer ? to_vaule_hops : 0;
@@ -1168,7 +1172,7 @@ public:
         assert(task.type == SubscriptionTask::Type::SubReqAck);
         if(swap) {
           long mirror_addr = find_mirror_address(task.to_vault, task.addr);
-          int hops = calculate_hops_travelled(task.to_vault, task.from_vault, WRITE_LENGTH);
+          int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault, WRITE_LENGTH);
           total_hops += hops;
           pending.push_back(SubscriptionTask(mirror_addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::SubXfer));
         }
@@ -1201,8 +1205,8 @@ public:
         subscription_tables[task.to_vault].stop_receiving();
         // Calculate the hops to original and from vault (they are not the same in the case of resubscription)
         int original_vault = find_original_vault_of_address(task.addr);
-        int original_vault_hops = calculate_hops_travelled(original_vault, task.to_vault);
-        int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
+        int original_vault_hops = mem_ptr -> calculate_hops_travelled(original_vault, task.to_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault);
         // Send the acknowledgement to the original vault so it can update its entry accordingly
         print_debug_info("We are pushing SubXferAck task from "+to_string(task.to_vault)+" to "+to_string(original_vault)+" with addr "+to_string(task.addr));
         if(is_pending_removal) {
@@ -1249,8 +1253,8 @@ public:
         int original_vault = find_original_vault_of_address(addr);
         // The from_vault might be either the original vault or current vault, so we need to calculate both the hops from from vault to current vault
         // And from from vault to original vault. One of those hop counts will be 0
-        int hops = calculate_hops_travelled(caller_vault, current_vault);
-        int reverse_hops = calculate_hops_travelled(caller_vault, original_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(caller_vault, current_vault);
+        int reverse_hops = mem_ptr -> calculate_hops_travelled(caller_vault, original_vault);
         SubscriptionTask task = SubscriptionTask(addr, caller_vault, current_vault, hops, SubscriptionTask::Type::UnsubReq);
         // If we are calling from the original vault, we need to send UnsubReq through the network to the current vault so it can send data back
         if(caller_vault == original_vault) {
@@ -1289,7 +1293,7 @@ public:
           subscription_tables[task.to_vault].submit_unsubscription(task.addr);
           // We again find the original vault of the address to send the data back
           // The to_vault will always be the "current vault" holding the address
-          int hops = calculate_hops_travelled(task.to_vault, original_vault);
+          int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, original_vault);
           // It seems we do not need to send acknowledgement in the case of unsubscription request
           // if(task.to_vault != task.from_vault) {
           //   pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops, SubscriptionTask::Type::UnsubReqAck));
@@ -1311,7 +1315,7 @@ public:
         } else if(subscription_tables[task.to_vault].is_pending_resubscription(task.addr)
             && task.from_vault == original_vault) {
           int future_subscribed_vault = subscription_tables[task.to_vault][task.addr];
-          int hops = calculate_hops_travelled(task.to_vault, future_subscribed_vault);
+          int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, future_subscribed_vault);
           print_debug_info("We are pushing UnsubReq task from "+to_string(original_vault)+" to "+to_string(future_subscribed_vault)+" with addr "+to_string(task.addr));
           // We deliberately delay the unsubscription request until the resubscription likely completes
           total_hops += hops;
@@ -1327,7 +1331,7 @@ public:
       void process_unsubscribe_transfer(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::UnsubXfer);
         // Then we complete unsubscription
-        int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault);
         print_debug_info("Complete unsubscription of address "+to_string(task.addr));
         subscription_tables[task.to_vault].complete_unsubscription(task.addr);
         // And send an acknowledgement back to the "current vault" so it knows it can safely erase this entry from the subscription table
@@ -1346,7 +1350,7 @@ public:
       // Process resubscription request
       void process_resubscription_request(const SubscriptionTask& task) {
         assert(task.type == SubscriptionTask::Type::ResubReq);
-        int hops = calculate_hops_travelled(task.to_vault, task.from_vault);
+        int hops = mem_ptr -> calculate_hops_travelled(task.to_vault, task.from_vault);
         // If this entry is anything other than subscribed, we cannot resubscribe it, so we negatively acknowledgement this resubscription request to ask the sender to try later
         if(!subscription_tables[task.to_vault].is_subscribed(task.addr)) {
           total_hops += task.from_buffer ? hops : 0;
@@ -1635,7 +1639,7 @@ public:
         long addr = req.addr;
         pre_process_addr(addr);
         // Calculate hops and count for prefetch policy check and implementation
-        uint64_t hops = (uint64_t)calculate_hops_travelled(req_vault_id, val_vault_id);
+        uint64_t hops = (uint64_t)(mem_ptr -> calculate_hops_travelled(req_vault_id, val_vault_id));
         uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
         // If the policy says that we should subscribe this address, we subscribe it to the requester's vault so it is closer when accessed in the future
         // We do not subscribe in the case that the original vault has the address pending subscription or removal, or when the subscription is already done to the requester vault
@@ -1666,8 +1670,8 @@ public:
         if(subscription_tables[original_vault].is_subscribed(addr)
           || subscription_tables[original_vault].is_pending_removal(addr)) {
           int subscribed_vault = subscription_tables[original_vault][addr];
-          int hops_req_original = calculate_hops_travelled(req_vault, original_vault);
-          int hops_original_subscribed = calculate_hops_travelled(original_vault, subscribed_vault);
+          int hops_req_original = mem_ptr -> calculate_hops_travelled(req_vault, original_vault);
+          int hops_original_subscribed = mem_ptr -> calculate_hops_travelled(original_vault, subscribed_vault);
           // These two are one in real hardware
           pending.push_back(SubscriptionTask(addr, req_vault, original_vault, hops_req_original+pending_send[req_vault], SubscriptionTask::Type::UpdateOnWrite));
           pending.push_back(SubscriptionTask(addr, req_vault, subscribed_vault, hops_req_original+hops_original_subscribed+pending_send[req_vault], SubscriptionTask::Type::UpdateOnWrite));
@@ -1840,6 +1844,13 @@ public:
         pim_mode_enabled = configs.pim_mode_enabled();
         network_overhead = configs.network_overhead_enabled();
 
+        if(network_overhead) {
+          network_width = ceil(sqrt(ctrls.size()));
+          network_height = ceil(sqrt(ctrls.size()));
+          max_hops = (network_width+network_height)*(DATA_LENGTH+2);
+          cout << "We are simulating the network latency of a " << network_width << "x" << network_height << " network" << endl;
+        }
+
         capacity_per_stack = spec->channel_width / 8;
 
         for (unsigned int lev = 0; lev < addr_bits.size(); lev++) {
@@ -1896,18 +1907,17 @@ public:
         address_distribution_r.resize(configs.get_core_num());
         address_distribution_w.resize(configs.get_core_num());
         address_distribution_o.resize(configs.get_core_num());
-        hops_distribution.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
-        hops_distribution_r.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
-        hops_distribution_w.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
-        hops_distribution_o.assign(NETWORK_WIDTH+NETWORK_HEIGHT, 0);
-        network_cycle_distribution.assign(MAX_HOP, 0);
+        hops_distribution.assign(network_width+network_height, 0);
+        hops_distribution_r.assign(network_width+network_height, 0);
+        hops_distribution_w.assign(network_width+network_height, 0);
+        hops_distribution_o.assign(network_width+network_height, 0);
+        network_cycle_distribution.assign(max_hops, 0);
         for(int i=0; i < configs.get_core_num(); i++){
-            //up to 32 vaults
-            address_distribution[i].resize(32);
-            address_distribution_r[i].resize(32);
-            address_distribution_w[i].resize(32);
-            address_distribution_o[i].resize(32);
-            for(int j=0; j < 32; j++){
+            address_distribution[i].resize(ctrls.size());
+            address_distribution_r[i].resize(ctrls.size());
+            address_distribution_w[i].resize(ctrls.size());
+            address_distribution_o[i].resize(ctrls.size());
+            for(int j=0; j < ctrls.size(); j++){
                 address_distribution[i][j] = 0;
                 address_distribution_r[i][j] = 0;
                 address_distribution_w[i][j] = 0;
@@ -2324,8 +2334,11 @@ public:
         if (is_active) {
           ramulator_active_cycles++;
         }
-        for (auto logic_layer : logic_layers) {
-          logic_layer->tick();
+        // We are using logic layer only when PIM is enabled
+        if(!pim_mode_enabled) {
+          for (auto logic_layer : logic_layers) {
+            logic_layer->tick();
+          }
         }
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           prefetcher_set.tick();
@@ -2640,7 +2653,9 @@ public:
                 prefetcher_set.update_count_table_and_submit_subscription(req);
               }
               int actual_hops = req.served_without_hops == 1 ? 0 : hops;
+              assert(total_hops >= 0);
               total_hops += actual_hops;
+              assert(total_hops >= 0);
               if(actual_hops > no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
                 prefetcher_set.record_negative_feedback(requester_vault, actual_hops-no_prefetcher_hops, actual_hops);
@@ -2674,7 +2689,9 @@ public:
               network_cycle_distribution[hops]++;
               int simplified_hops = calculate_hops_travelled(req.coreid, req.addr_vec[int(HMC::Level::Vault)]);
               hops_distribution[simplified_hops]++;
+              assert(address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]] >= 0);
               address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
+              assert(address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]] >= 0);
               if (req.type == Request::Type::WRITE){
                 hops_distribution_w[simplified_hops]++;
                 address_distribution_w[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
@@ -2721,7 +2738,6 @@ public:
             memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
                              << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
                              << req.addr_vec[int(HMC::Level::Column)] << "\n";
-
             return true;
         }
         else{
@@ -2876,14 +2892,14 @@ public:
       string to_open_hops_distribution = application_name+".hops_distribution.csv";
       ofstream hops_distribution_ofs(to_open_hops_distribution.c_str(), ofstream::out);
       hops_distribution_ofs << "Hops,Read,Write,Other,Total" << "\n";
-      for(int i = 0; i < NETWORK_WIDTH+NETWORK_HEIGHT; i++) {
+      for(int i = 0; i < network_width+network_height; i++) {
         hops_distribution_ofs << i << "," << hops_distribution_r[i] << "," << hops_distribution_w[i] << "," << hops_distribution_o[i] << "," << hops_distribution[i] << "\n";
       }
       hops_distribution_ofs.close();
       string to_open_network_cycles_distribution = application_name+".network_cycle.csv";
       ofstream network_cycle_ofs(to_open_network_cycles_distribution.c_str(), ofstream::out);
       network_cycle_ofs << "Cycle,# Requests\n";
-      for(int i = 0; i < MAX_HOP; i++) {
+      for(int i = 0; i < max_hops; i++) {
         network_cycle_ofs << i << "," << network_cycle_distribution[i] << "\n";
       }
       network_cycle_ofs.close();

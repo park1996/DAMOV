@@ -57,13 +57,19 @@ def create_host_configs_prefetch(benchmark, application, function, command, vers
                 line = line.replace("COMMAND_STRING", "\"" + command + "\";")
                 line = line.replace("THREADS", str(cores))
                 line = line.replace("PIM_ROOT",PIM_ROOT)
-
                 config_file.write(line)
             config_file.close()
         ins.close()
 
 def create_pim_configs(benchmark, application, function, command, version):
     number_of_cores = [1, 4, 16, 64, 256]
+    core_config = {1:"HMC_128MB_va1",
+            4:"HMC_512MB_va4",
+            16:"HMC_2GB_va16",
+            32:"HMC_4GB",
+            64:"HMC_8GB_va64",
+            128:"HMC_16GB_va128",
+            256:"HMC_32GB_va256"}
     if "ooo" in version:
         number_of_cores.append(32)
 
@@ -82,6 +88,10 @@ def create_pim_configs(benchmark, application, function, command, version):
                 line = line.replace("COMMAND_STRING", "\"" + command + "\";")
                 line = line.replace("THREADS", str(cores))
                 line = line.replace("PIM_ROOT",PIM_ROOT)
+                line = line.replace("gmMBytes = 8192;", "gmMBytes = "+str(128*cores)+";")
+                line = line.replace("HMC-config.cfg", "pim/HMC-NoPF-DebugOff-va"+str(cores)+"-config.cfg")
+                if cores != 32:
+                    line = line.replace("HMC_4GB", core_config[cores])
 
                 config_file.write(line)
             config_file.close()
