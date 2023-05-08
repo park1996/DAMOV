@@ -41,7 +41,7 @@ def get_prefetcher_types():
     return ["Allocate"]
 
 def get_core_numbers():
-    return [1, 4, 16, 32, 64, 256]
+    return [1, 4, 16, 32, 64, 128, 256]
 
 def get_core_to_mem_config():
     core_config = {1:"HMC_128MB_va1",
