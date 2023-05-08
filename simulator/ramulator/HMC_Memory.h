@@ -767,12 +767,14 @@ public:
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
       bool bimodel_adaptive_on = true;
+      bool use_maximum_latency = false;
       int invert_latency_variance_threshold = 40;
       vector<long> feedbacks;
       vector<long> latencies_for_current_epoch;
       vector<int> requests_completed_for_current_epoch;
-      vector<double> previous_avg_latencies;
+      vector<double> previous_latencies;
       vector<int> last_threshold_change;
+      vector<long> maximum_latency_for_current_epoch;
       long feedback_bits = 16;
       // Assuming we are using a 2's comp register with given # of bits to store this info
       long feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
@@ -941,6 +943,14 @@ public:
           cout << "Bimodel Adaptive is off" << endl;
         }
       }
+      void set_use_maximum_latency(bool flag) {
+        use_maximum_latency = flag;
+        if(use_maximum_latency) {
+          cout << "Using Maximum Latency" << endl;
+        } else {
+          cout << "Using Average Latency" << endl;
+        }
+      }
       void set_positive_feedback_threshold(long threshold) {
         // Ignore threshold if the flag is turned off
         if(adaptive_threshold_changes) {
@@ -1005,7 +1015,7 @@ public:
         feedbacks.assign(controllers, 0);
         latencies_for_current_epoch.assign(controllers, 0);
         requests_completed_for_current_epoch.assign(controllers, 0);
-        previous_avg_latencies.assign(controllers, 0.0);
+        previous_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
         last_threshold_change.assign(controllers, -1);
         for(int c = 0; c < controllers; c++) {
@@ -1540,7 +1550,7 @@ public:
           for(int c = 0; c < controllers; c++) {
             int new_count_threshold = prefetch_count_thresholds[c];
             // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
-            if(previous_avg_latencies[c] == 0 || bimodel_adaptive_on) {
+            if(previous_latencies[c] == 0 || bimodel_adaptive_on) {
               if(feedbacks[c] > positive_feedback_threshold) {
                 // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
                 new_count_threshold++;
@@ -1550,12 +1560,16 @@ public:
               }              
             }
 
-            double current_average_latency = 0;
-            if(requests_completed_for_current_epoch[c]) {
-              current_average_latency = ((double)latencies_for_current_epoch[c]) / ((double)requests_completed_for_current_epoch[c]);
+            double current_latency = 0;
+            if(!use_maximum_latency) {
+              if(requests_completed_for_current_epoch[c]) {
+                current_latency = ((double)latencies_for_current_epoch[c]) / ((double)requests_completed_for_current_epoch[c]);
+              }
+            } else {
+              current_latency = maximum_latency_for_current_epoch[c];
             }
-            if(previous_avg_latencies[c] > 0) {
-              double magnitude = current_average_latency / previous_avg_latencies[c];
+            if(previous_latencies[c] > 0) {
+              double magnitude = current_latency / previous_latencies[c];
               // 1/invert_latency_variance_threshold% difference = 1 hop change
               int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
               // cout << "The magnitude is " << magnitude << " our last change is " << last_threshold_change[c] << endl;
@@ -1564,9 +1578,10 @@ public:
               // }
               new_count_threshold += change;
             }
-            previous_avg_latencies[c] = current_average_latency;
+            previous_latencies[c] = current_latency;
             latencies_for_current_epoch[c] = 0;
             requests_completed_for_current_epoch[c] = 0;
+            maximum_latency_for_current_epoch[c] = 0;
 
             if(new_count_threshold < (int)count_table.get_count_lower_limit()) {
               // cout << "Pending new count threshold is " << new_count_threshold << " and it is lower than the lower limit of " << count_table.get_count_lower_limit() << endl;
@@ -1761,6 +1776,9 @@ public:
         }
         latencies_for_current_epoch[from_vault] += latency;
         requests_completed_for_current_epoch[from_vault]++;
+        if(latency > maximum_latency_for_current_epoch[from_vault]) {
+          maximum_latency_for_current_epoch[from_vault] = latency;
+        }
       }
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
@@ -1989,6 +2007,9 @@ public:
           }
           if (configs.contains("bimodel_adaptive")) {
             prefetcher_set.set_bimodel_adaptive(configs["bimodel_adaptive"] == "true");
+          }
+          if (configs.contains("use_maximum_latency")) {
+            prefetcher_set.set_use_maximum_latency(configs["use_maximum_latency"] == "true");
           }
         }
 
