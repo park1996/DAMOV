@@ -1018,6 +1018,7 @@ public:
         previous_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
         last_threshold_change.assign(controllers, -1);
+        maximum_latency_for_current_epoch.assign(controllers, 0);
         for(int c = 0; c < controllers; c++) {
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
