@@ -26,7 +26,7 @@ debug_tag = "debugoff"
 
 start_time = datetime.now()
 print "We are starting experiment on "+start_time.strftime("%Y-%m-%d %H:%M:%S")
-maximum_thread = 1
+maximum_thread = 15
 threads = []
 output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -58,7 +58,7 @@ def clean_outputs():
     subprocess.call(["rm", os.path.join(os.getcwd(), "HPCG*.txt")])
     subprocess.call(["rm", os.path.join(os.getcwd(), "out.fluid")])
 
-def run_benchmark(processor_type, benchmark_suite, core_number, function, postfix):
+def run_benchmark(processor_type, benchmark_suite, core_number, function, postfix, is_rerun):
     thread_start_time = datetime.now()
     config_file = os.path.join("config_files", processor_type, benchmark_suite, core_number, function+".cfg")
     stdout_file = os.path.join(output_dir, processor_type.replace("/", "_")+"_"+core_number+"_"+benchmark_suite+"_"+function+postfix+".txt")
@@ -72,7 +72,8 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
             csv_writer.writerow([processor_type.replace("/", "_"), core_number, benchmark_suite, function, "Success", thread_start_time.strftime("%Y-%m-%d_%H-%M-%S"), thread_end_time.strftime("%Y-%m-%d_%H-%M-%S"), str(thread_end_time - thread_start_time)])
         else:
             csv_writer.writerow([processor_type.replace("/", "_"), core_number, benchmark_suite, function, "Failed", thread_start_time.strftime("%Y-%m-%d_%H-%M-%S"), thread_end_time.strftime("%Y-%m-%d_%H-%M-%S"), str(thread_end_time - thread_start_time)])
-            failed_benchmarks.append([processor_type, benchmark_suite, core_number, function])
+            if not is_rerun:
+                failed_benchmarks.append([processor_type, benchmark_suite, core_number, function])
 
 # Following are all the benchmark workloads that is currently compiling and available
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "HSTO_HSTO", "OOPPAD_OOPPAD"],
@@ -155,12 +156,12 @@ if "chai" in benchmark_suites_and_benchmarks_functions:
 
 processor_types = ["pim_ooo_netoh"] # Include one for baseline
 # processor_types = []
-# core_numbers = get_core_numbers()
-core_numbers = [256]
+core_numbers = get_core_numbers()
+# core_numbers = [256]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["allocate"]
 for prefetcher_type in prefetcher_types:
-    # processor_types.append(processor_type_prefix+prefetcher_type+"/adaptive_"+debug_tag)
+    processor_types.append(processor_type_prefix+prefetcher_type+"/adaptive_"+debug_tag)
     for hops_threshold in hops_thresholds:
         for count_threshold in count_thresholds:
             processor_types.append(processor_type_prefix+prefetcher_type+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag)
@@ -179,7 +180,7 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
             for core_number in core_numbers:
                 scheduled_experiments += 1
                 print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + str(core_number) + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
-                current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, ""))
+                current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, "", False))
                 threads.append(current_thread)
                 current_thread.start()
                 if threading.active_count() >= maximum_thread + 1:
@@ -206,7 +207,7 @@ if len(failed_benchmarks) > 0:
         # processor_type = processor_type.replace("debugoff", "debugon")
         scheduled_experiments += 1
         print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + str(core_number) + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
-        current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, "_rerun"))
+        current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, "_rerun", True))
         threads.append(current_thread)
         current_thread.start()
         if threading.active_count() >= maximum_thread + 1 or psutil.virtual_memory()[3]/1000000000 >= max_memory_gb:
