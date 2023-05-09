@@ -72,6 +72,7 @@ def create_pim_configs(benchmark, application, function, command, version):
             256:"HMC_32GB_va256"}
     if "ooo" in version:
         number_of_cores.append(32)
+        number_of_cores.append(128)
 
     for cores in number_of_cores:
         mkdir_p(ROOT+"config_files/pim_"+version+"/"+benchmark+"/"+str(cores)+"/")
