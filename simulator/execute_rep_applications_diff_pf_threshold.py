@@ -1,5 +1,6 @@
 import threading
 import os
+import glob
 import subprocess
 import time
 from datetime import datetime
@@ -26,7 +27,7 @@ debug_tag = "debugoff"
 
 start_time = datetime.now()
 print "We are starting experiment on "+start_time.strftime("%Y-%m-%d %H:%M:%S")
-maximum_thread = 15
+maximum_thread = 50
 threads = []
 output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -54,8 +55,10 @@ def clean_darknet_chai_inputs():
         subprocess.call(["rm", "-r", os.path.join(os.getcwd(), "input_hsti")])
 
 def clean_outputs():
-    subprocess.call(["rm", os.path.join(os.getcwd(), "hpcg*.txt")])
-    subprocess.call(["rm", os.path.join(os.getcwd(), "HPCG*.txt")])
+    for f in glob.glob(os.path.join(os.getcwd(), "hpcg*.txt")):
+        os.remove(f)
+    for f in glob.glob(os.path.join(os.getcwd(), "HPCG*.txt")):
+        os.remove(f)
     subprocess.call(["rm", os.path.join(os.getcwd(), "out.fluid")])
 
 def run_benchmark(processor_type, benchmark_suite, core_number, function, postfix, is_rerun):
@@ -219,7 +222,7 @@ if len(failed_benchmarks) > 0:
         thread.join()
 
 #Rerun serialized experiments
-failed_benchmarks = {}
+failed_benchmarks = []
 maximum_thread = 1
 # Darknet requires some input to be placed in the cwd so we copy it over
 if "darknet" in serialized_benchmark_suites_and_benchmarks_functions:
