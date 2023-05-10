@@ -158,11 +158,11 @@ with open(output_filename, mode='w') as csv_file:
                     baseline_accesses_to_vaults = extract_to_vault_count(baseline_addr_dist_file_location, core_number)
                     baseline_req_to_vault_mean = numpy.mean(baseline_accesses_to_vaults)
                     baseline_req_to_vault_std = numpy.std(baseline_accesses_to_vaults)
-                    baseline_req_to_vault_cov = baseline_req_to_vault_std / baseline_req_to_vault_mean
+                    baseline_req_to_vault_cov = 0.0 if numpy.isnan(baseline_req_to_vault_mean) or numpy.isnan(baseline_req_to_vault_std) or baseline_req_to_vault_mean == 0 else baseline_req_to_vault_std / baseline_req_to_vault_mean
                 for prefetcher_type in prefetcher_types:
                     for hops_threshold in hops_thresholds:
                         prefetcher_policies = []
-                        # prefetcher_policies.append("adaptive")
+                        prefetcher_policies.append("adaptive")
                         for count_threshold in count_thresholds:
                             prefetcher_policies.append(str(hops_threshold)+"h"+str(count_threshold)+"c")
                         csv_header = ["", "baseline"]+prefetcher_policies
@@ -269,12 +269,12 @@ with open(output_filename, mode='w') as csv_file:
                                 readq_pending = extract_subscription_stats(sub_stat_file_location, "TotalReadQPending")
                                 writeq_pending = extract_subscription_stats(sub_stat_file_location, "TotalWriteQPending")  
                                 access_hops_line.append("N/A" if access_hops == -1 else str(access_hops))
-                                normalized_access_hops_line.append("N/A" if access_hops == -1 or baseline_access_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(access_hops)))
+                                normalized_access_hops_line.append("N/A" if access_hops == -1 or access_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(access_hops)))
                                 sub_hops_line.append("N/A" if sub_hops == -1 else str(sub_hops))
                                 total_hops_line.append("N/A" if total_hops == -1 else str(total_hops))
-                                normalized_total_hops_line.append("N/A" if total_hops == -1 or baseline_access_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(total_hops)))
+                                normalized_total_hops_line.append("N/A" if total_hops == -1 or total_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(total_hops)))
                                 mem_access_line.append("N/A" if mem_access == -1 else str(mem_access))
-                                normalized_memory_access_line.append("N/A" if mem_access == -1 or baseline_mem_access == 0 or baseline_mem_access == -1 else str(float(baseline_mem_access)/float(mem_access)))
+                                normalized_memory_access_line.append("N/A" if mem_access == -1 or mem_access == 0 or baseline_mem_access == -1 else str(float(baseline_mem_access)/float(mem_access)))
                                 access_hops_per_mem_line.append("N/A" if access_hops == -1 or mem_access == 0 or mem_access == -1 else str(float(access_hops)/float(mem_access)))
                                 total_hops_per_mem_line.append("N/A" if total_hops == -1 or mem_access == 0 or mem_access == -1 else str(float(total_hops)/float(mem_access)))
                                 submitted_subscriptions_line.append("N/A" if submitted_subscriptions == -1 else str(submitted_subscriptions))
@@ -290,10 +290,10 @@ with open(output_filename, mode='w') as csv_file:
                                 count_table_avg_count_line.append("N/A" if count_table_total == -1 or count_table_evic == 0 or count_table_evic == -1 else str(float(count_table_total)/float(count_table_evic)))
                                 request_latency_line.append("N/A" if req_latency == -1 else str(req_latency))
                                 avg_request_latency_line.append("N/A" if req_latency == -1 or mem_access == 0 or mem_access == -1 else str(float(req_latency)/float(mem_access)))
-                                normalized_req_latency_line.append("N/A" if req_latency == -1 or baseline_req_latency == -1 or baseline_req_latency == 0 else str(float(baseline_req_latency)/float(req_latency)))
+                                normalized_req_latency_line.append("N/A" if req_latency == -1 or baseline_req_latency == -1 or req_latency == 0 else str(float(baseline_req_latency)/float(req_latency)))
                                 hmc_latency_line.append("N/A" if hmc_latency == -1 else str(hmc_latency))
                                 avg_hmc_latency_line.append("N/A" if hmc_latency == -1 or mem_access == 0 or mem_access == -1 else str(float(hmc_latency)/float(mem_access)))
-                                normalized_hmc_latency_line.append("N/A" if hmc_latency == -1 or baseline_hmc_latency == -1 or baseline_hmc_latency == 0 else str(float(baseline_hmc_latency)/float(hmc_latency)))
+                                normalized_hmc_latency_line.append("N/A" if hmc_latency == -1 or baseline_hmc_latency == -1 or hmc_latency == 0 else str(float(baseline_hmc_latency)/float(hmc_latency)))
                                 readq_pending_line.append("N/A" if readq_pending == -1 else str(readq_pending))
                                 writeq_pending_line.append("N/A" if writeq_pending == -1 else str(writeq_pending))
                             if not os.path.isfile(addr_dist_file_location):
@@ -304,7 +304,7 @@ with open(output_filename, mode='w') as csv_file:
                                 accesses_to_vaults = extract_to_vault_count(addr_dist_file_location, core_number)
                                 req_to_vault_mean = numpy.mean(accesses_to_vaults)
                                 req_to_vault_std = numpy.std(accesses_to_vaults)
-                                req_to_vault_cov = req_to_vault_std / req_to_vault_mean
+                                req_to_vault_cov = 0.0 if numpy.isnan(req_to_vault_std) or numpy.isnan(req_to_vault_mean) or req_to_vault_mean == 0 else req_to_vault_std / req_to_vault_mean
                                 requests_to_vault_mean_line.append(str(req_to_vault_mean))
                                 requests_to_vault_std_line.append(str(req_to_vault_std))
                                 requests_to_vault_cov_line.append(str(req_to_vault_cov))
