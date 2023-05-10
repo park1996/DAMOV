@@ -99,22 +99,22 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or run multiple times?)
-benchmark_suites_and_benchmarks_functions = {
+serialized_benchmark_suites_and_benchmarks_functions = {
     "hpcg" : ["HPCG_ComputeSYMGS"],
     "hashjoin" : ["PRH_histogramjoin"], 
     "splash-2":["FFT_Reverse","FFT_Transpose"],
     "ligra" : ["BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded"],}
 # The following benchmarks are the set complement of the above benchmark
-# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
-#     "darknet" : ["yolo_gemm_nn"],
-#     "hashjoin" : ["NPO_probehashtable"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
-#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
-#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
-#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
-#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
-#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
+    "darknet" : ["yolo_gemm_nn"],
+    "hashjoin" : ["NPO_probehashtable"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
+    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+    "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+    "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following are benchmarks that impacted by our model
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["yolo_gemm_nn"],
@@ -217,6 +217,86 @@ if len(failed_benchmarks) > 0:
     print "The main thread has started all threads. Now waiting for threads to finish..."
     for thread in threads:
         thread.join()
+
+#Rerun serialized experiments
+failed_benchmarks = {}
+maximum_thread = 1
+# Darknet requires some input to be placed in the cwd so we copy it over
+if "darknet" in serialized_benchmark_suites_and_benchmarks_functions:
+    print "Copying the required input files for darknet..."
+    data_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/Darknet/data/"))
+    cfg_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/Darknet/cfg/"))
+    subprocess.call(["cp", "-r", data_dir, os.path.join(os.getcwd(), "data")])
+    subprocess.call(["cp", "-r", cfg_dir, os.path.join(os.getcwd(), "cfg")])
+
+# Chai's HSTO and BS also requires input to be in the cwd
+if "chai" in serialized_benchmark_suites_and_benchmarks_functions:
+    chai_benchmark_functions = serialized_benchmark_suites_and_benchmarks_functions["chai"]
+    if "HSTO_HSTO" in chai_benchmark_functions:
+        print "Copying the required input files for chai HSTO_HSTO..."
+        input_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/chai-cpu/HSTO/input/"))
+        subprocess.call(["cp", "-r", input_dir, os.path.join(os.getcwd(), "input_hsto")])
+    if "HSTI_HSTI" in chai_benchmark_functions:
+        print "Copying the required input files for chai HSTI_HSTI..."
+        input_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/chai-cpu/HSTI/input_hsti/"))
+        subprocess.call(["cp", "-r", input_dir, os.path.join(os.getcwd(), "input_hsti")])
+    if "BS_BEZIER_KERNEL" in chai_benchmark_functions:
+        print "Copying the required input files for chai BS_BEZIER_KERNEL..."
+        input_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/chai-cpu/BS/input/"))
+        subprocess.call(["cp", "-r", input_dir, os.path.join(os.getcwd(), "input")])
+
+total_experiment_count = 0
+for suite in serialized_benchmark_suites_and_benchmarks_functions.keys():
+    total_experiment_count += len(serialized_benchmark_suites_and_benchmarks_functions[suite])
+total_experiment_count *= len(processor_types)
+total_experiment_count *= len(core_numbers)
+print "Starting experiments. There are " + str(total_experiment_count) + " experiments to be scheduled, for cores: " + str(core_numbers) + " and processor types: " + str(processor_types)
+scheduled_experiments = 0
+
+for suite in serialized_benchmark_suites_and_benchmarks_functions.keys():
+    for benchmark_function in serialized_benchmark_suites_and_benchmarks_functions[suite]:
+        for processor_type in processor_types:
+            for core_number in core_numbers:
+                scheduled_experiments += 1
+                print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + str(core_number) + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
+                current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, "", False))
+                threads.append(current_thread)
+                current_thread.start()
+                if threading.active_count() >= maximum_thread + 1:
+                    print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads. Waiting for threads to finish..."
+                    while threading.active_count() >= maximum_thread + 1:
+                        time.sleep(1)
+print "The main thread has started all threads. Now waiting for threads to finish..."
+for thread in threads:
+    thread.join()
+
+if len(failed_benchmarks) > 0:
+    print "The following benchmark runs has failed "+str(failed_benchmarks)
+    print "Re-executing them with benchmark on for debug information"
+    with open(summary_file, "a") as status_summary:
+        csv_writer = csv.writer(status_summary, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        csv_writer.writerow(["Below are rerun of failed experiments"])
+    total_experiment_count = len(failed_benchmarks)
+    scheduled_experiments = 0
+    for benchmark in failed_benchmarks:
+        processor_type = benchmark[0]
+        suite = benchmark[1]
+        core_number = benchmark[2]
+        benchmark_function = benchmark[3]
+        # processor_type = processor_type.replace("debugoff", "debugon")
+        scheduled_experiments += 1
+        print "Starting experment of " + suite + " " + benchmark_function + " with processor " + processor_type.replace("/", "_") + " and " + str(core_number) + " core(s) (" + str(scheduled_experiments) + "/" + str(total_experiment_count) + ")"
+        current_thread = threading.Thread(target = run_benchmark, args = (processor_type, suite, str(core_number), benchmark_function, "_rerun", True))
+        threads.append(current_thread)
+        current_thread.start()
+        if threading.active_count() >= maximum_thread + 1 or psutil.virtual_memory()[3]/1000000000 >= max_memory_gb:
+            print "Reaching maximum allowed concurrent thread number of " + str(maximum_thread) + " threads or maximum memory allocated. Waiting for threads to finish..."
+            while threading.active_count() >= maximum_thread + 1:
+                time.sleep(1)
+    print "The main thread has started all threads. Now waiting for threads to finish..."
+    for thread in threads:
+        thread.join()
+
 end_time = datetime.now()
 print "We are finishing at "+end_time.strftime("%Y-%m-%d %H:%M:%S")
 print "It took "+str(end_time - start_time)
