@@ -243,7 +243,7 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
                             accesses_to_vaults = extract_to_vault_count(addr_dist_file_location, core_number)
                             req_to_vault_mean = numpy.mean(accesses_to_vaults)
                             req_to_vault_std = numpy.std(accesses_to_vaults)
-                            req_to_vault_cov = req_to_vault_std / req_to_vault_mean
+                            req_to_vault_cov = 0 if numpy.isnan(req_to_vault_std) or numpy.isnan(req_to_vault_mean) or req_to_vault_mean == 0 else req_to_vault_std / req_to_vault_mean
                             coefficient_of_variation_map[config_tag] = req_to_vault_cov
         x_lengend = "Configurations"
 
