@@ -34,6 +34,10 @@ protected:
   bool get_memory_addresses = false;
   string application_name;
   ofstream memory_addresses;
+  ofstream adaptive_thresholds;
+  ofstream latencies_each_epoch;
+  ofstream feedback_reg_epoch;
+
 
 
   long capacity_per_stack;
@@ -149,10 +153,33 @@ public:
 
     void set_address_recorder (){
       get_memory_addresses = false;
-      string to_open = application_name + ".memory_addresses";
+      string to_open = application_name + ".memory_addresses.csv";
       std::cout << "Recording memory trace at " << to_open << "\n";
       memory_addresses.open(to_open.c_str(), std::ofstream::out);
-      memory_addresses << "CLK ADDR W|R Vault BankGroup Bank Row Column \n";
+      memory_addresses << "CLK,ADDR,CoreID,Hops,NoPFHops,W|R,Vault,BankGroup,Bank,Row,Column \n";
+      string thresholds_to_open = application_name + ".adaptive_thresholds.csv";
+      adaptive_thresholds.open(thresholds_to_open.c_str(), std::ofstream::out);
+      adaptive_thresholds << "Epoch Start Cycle,";
+      for(int i = 0; i < ctrls.size(); i++) {
+        adaptive_thresholds << "Core " << i << ",";
+      }
+      adaptive_thresholds << "\n";
+
+      string latencies_to_open = application_name + ".latencies_per_epoch.csv";
+      latencies_each_epoch.open(latencies_to_open.c_str(), std::ofstream::out);
+      latencies_each_epoch << "Epoch Start Cycle,";
+      for(int i = 0; i < ctrls.size(); i++) {
+        latencies_each_epoch << "Core " << i << ",";
+      }
+      latencies_each_epoch << "\n";
+
+      string feedback_regs_to_open = application_name + ".feedback_regs_per_epoch.csv";
+      feedback_reg_epoch.open(feedback_regs_to_open.c_str(), std::ofstream::out);
+      feedback_reg_epoch << "Epoch Start Cycle,";
+      for(int i = 0; i < ctrls.size(); i++) {
+        feedback_reg_epoch << "Core " << i << ",";
+      }
+      feedback_reg_epoch << "\n";
     }
 
     void set_application_name(string _app){
@@ -769,18 +796,19 @@ public:
       bool bimodel_adaptive_on = true;
       bool use_maximum_latency = false;
       int invert_latency_variance_threshold = 40;
-      vector<long> feedbacks;
+      vector<int64_t> feedbacks;
       vector<long> latencies_for_current_epoch;
       vector<int> requests_completed_for_current_epoch;
       vector<double> previous_latencies;
       vector<int> last_threshold_change;
       vector<long> maximum_latency_for_current_epoch;
-      long feedback_bits = 16;
+      long feedback_bits = 18;
       // Assuming we are using a 2's comp register with given # of bits to store this info
-      long feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
-      long feedback_minimum = -(feedback_maximum+1);
+      int64_t feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
+      int64_t feedback_minimum = -(feedback_maximum+1);
       long positive_feedback_threshold = 10000;
       long negative_feedback_threshold = -10000;
+      long feedback_threshold = (long)(1<<(feedback_bits-1)) / ((long)count_table.get_count_upper_limit()+1);
       long total_positive_feedback = 0;
       long total_negative_feedback = 0;
       long total_threshold_increases = 0;
@@ -1022,6 +1050,7 @@ public:
         for(int c = 0; c < controllers; c++) {
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
+        feedback_threshold = (long)(1<<(feedback_bits-1)) / ((long)count_table.get_count_upper_limit()+1);
       }
       bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
         // TODO: Use machine learning to optimize prefetching
@@ -1547,19 +1576,24 @@ public:
           }
         }
         // Finally, we try to process threshold changes
-        if(mem_ptr -> clk % threshold_change_epoch == 0 && mem_ptr -> clk > 0 && adaptive_threshold_changes) {
+        if(mem_ptr -> clk % threshold_change_epoch == 0 && mem_ptr -> clk > 0) {
+          mem_ptr -> adaptive_thresholds << mem_ptr -> clk << ",";
+          mem_ptr -> latencies_each_epoch << mem_ptr -> clk << ",";
+          mem_ptr -> feedback_reg_epoch << mem_ptr -> clk << ",";
           for(int c = 0; c < controllers; c++) {
             int new_count_threshold = prefetch_count_thresholds[c];
             // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
             if(previous_latencies[c] == 0 || bimodel_adaptive_on) {
-              if(feedbacks[c] > positive_feedback_threshold) {
-                // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
-                new_count_threshold++;
-              } else if(feedbacks[c] < negative_feedback_threshold) {
-                // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
-                new_count_threshold--;
-              }              
+              // if(feedbacks[c] > positive_feedback_threshold) {
+              //   // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
+              //   new_count_threshold++;
+              // } else if(feedbacks[c] < negative_feedback_threshold) {
+              //   // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
+              //   new_count_threshold--;
+              // }
+              new_count_threshold += -1*(feedbacks[c] / feedback_threshold);
             }
+            mem_ptr -> feedback_reg_epoch << feedbacks[c] << ",";
 
             double current_latency = 0;
             if(!use_maximum_latency) {
@@ -1569,6 +1603,7 @@ public:
             } else {
               current_latency = maximum_latency_for_current_epoch[c];
             }
+            mem_ptr -> latencies_each_epoch << current_latency << ",";
             if(previous_latencies[c] > 0) {
               double magnitude = current_latency / previous_latencies[c];
               // 1/invert_latency_variance_threshold% difference = 1 hop change
@@ -1592,29 +1627,35 @@ public:
               // cout << "Pending new count threshold is " << new_count_threshold << " and it is higher than the higher limit of " << count_table.get_count_upper_limit() << endl;
               new_count_threshold = (int)count_table.get_count_upper_limit();
             }
+            if(adaptive_threshold_changes) {
+              if(new_count_threshold > prefetch_count_thresholds[c]) {
+                // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
+                total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
+                last_threshold_change[c] = 1;
+              } else if(new_count_threshold < prefetch_count_thresholds[c] || new_count_threshold == 0) {
+                // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
+                total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
+                last_threshold_change[c] = -1;
+              }
 
-            if(new_count_threshold > prefetch_count_thresholds[c]) {
-              // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
-              total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
-              last_threshold_change[c] = 1;
-            } else if(new_count_threshold < prefetch_count_thresholds[c] || new_count_threshold == 0) {
-              // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
-              total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
-              last_threshold_change[c] = -1;
+              if(new_count_threshold > prefetch_maximum_count_threshold) {
+                  prefetch_maximum_count_threshold = new_count_threshold;
+              }
+
+              for(auto addr:subscription_tables[c].unused_subscriptions) {
+                unsubscribe_address(c, addr.first);
+              }
+
+              mem_ptr -> adaptive_thresholds << new_count_threshold << ",";
+              if(new_count_threshold > prefetch_count_thresholds[c])
+              prefetch_count_thresholds[c] = new_count_threshold;
+              subscription_tables[c].propogate_count_threshold(new_count_threshold);
+              // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
             }
-
-            if(new_count_threshold > prefetch_maximum_count_threshold) {
-                prefetch_maximum_count_threshold = new_count_threshold;
-            }
-
-            for(auto addr:subscription_tables[c].unused_subscriptions) {
-              unsubscribe_address(c, addr.first);
-            }
-
-            prefetch_count_thresholds[c] = new_count_threshold;
-            subscription_tables[c].propogate_count_threshold(new_count_threshold);
-            // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
           }
+          mem_ptr -> adaptive_thresholds << "\n";
+          mem_ptr -> latencies_each_epoch <<  "\n";
+          mem_ptr -> feedback_reg_epoch <<  "\n";
         }
       }
       void pre_process_addr(long& addr) {
@@ -1715,12 +1756,13 @@ public:
           return;
         }
         assert(hops_diff >= 0);
-        // cout << "Increasing feedback vaule, from " << feedbacks[vault];
+        // cout << "Increasing feedback vaule by " << hops_diff << ", from " << feedbacks[vault];
         feedbacks[vault]+=hops_diff;
         if(feedbacks[vault] > feedback_maximum) {
           feedbacks[vault] = feedback_maximum;
         }
         // cout << " to " << feedbacks[vault] << endl;
+        // cout << "The maximum feedback is " << feedback_maximum << " the minimum is" << feedback_minimum << endl;
         total_positive_feedback++;
         // if(feedbacks[vault] >= positive_feedback_threshold) {
         //   feedbacks[vault] = 0;
@@ -2614,10 +2656,12 @@ public:
             //I'm considering 32 vaults. So the 2D mesh will be 36x36
             //To calculate how many hops, check the manhattan distance
             int hops;
+            int actual_hops;
             int no_prefetcher_hops;
             if(!network_overhead) {
               hops = 0;
               no_prefetcher_hops = 0;
+              actual_hops = 0;
             }
             else if (req.type == Request::Type::READ){
               // If we do not use prefetcher, we calculate hops the traditional way
@@ -2674,16 +2718,18 @@ public:
               if (subscription_prefetcher_type != SubscriptionPrefetcherType::None && hops != 0) {
                 prefetcher_set.update_count_table_and_submit_subscription(req);
               }
-              int actual_hops = req.served_without_hops == 1 ? 0 : hops;
+              actual_hops = req.served_without_hops == 1 ? 0 : hops;
               assert(total_hops >= 0);
               total_hops += actual_hops;
               assert(total_hops >= 0);
               if(actual_hops > no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
                 prefetcher_set.record_negative_feedback(requester_vault, actual_hops-no_prefetcher_hops, actual_hops);
+                // prefetcher_set.record_negative_feedback(requester_vault, 1, actual_hops);
               } else if(actual_hops < no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting positive feedback" << endl;
                 prefetcher_set.record_positive_feedback(requester_vault, no_prefetcher_hops-actual_hops, actual_hops);
+                // prefetcher_set.record_positive_feedback(requester_vault, 1, actual_hops);
               // } else if(hops == no_prefetcher_hops) {
               //   prefetcher_set.record_positive_feedback(requester_vault, 1, hops);
               }
@@ -2730,12 +2776,12 @@ public:
 
             if(get_memory_addresses){
               if (profile_this_epoch){
-                memory_addresses << clk << " " << req.addr << " ";
-                if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
-                else if (req.type == Request::Type::READ)   memory_addresses << "R ";
-                else                                        memory_addresses << "NA ";
-                memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
-                                 << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+                memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
+                if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
+                else if (req.type == Request::Type::READ)   memory_addresses << "R,";
+                else                                        memory_addresses << "NA,";
+                memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << "," << req.addr_vec[int(HMC::Level::BankGroup)] << ","
+                                 << req.addr_vec[int(HMC::Level::Bank)] << ","  << req.addr_vec[int(HMC::Level::Row)]       << ","
                                  << req.addr_vec[int(HMC::Level::Column)] << "\n";
 
                 instruction_counter++;
@@ -2753,12 +2799,12 @@ public:
               }
             }
 
-            memory_addresses << clk << " " << req.addr << " ";
-            if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
-            else if (req.type == Request::Type::READ)   memory_addresses << "R ";
-            else                                        memory_addresses << "NA ";
-            memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
-                             << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
+            memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
+            if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
+            else if (req.type == Request::Type::READ)   memory_addresses << "R,";
+            else                                        memory_addresses << "NA,";
+            memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << "," << req.addr_vec[int(HMC::Level::BankGroup)] << ","
+                             << req.addr_vec[int(HMC::Level::Bank)] << ","  << req.addr_vec[int(HMC::Level::Row)]       << ","
                              << req.addr_vec[int(HMC::Level::Column)] << "\n";
             return true;
         }
@@ -2802,13 +2848,13 @@ public:
           cout << "Get memory address \n";
           if (profile_this_epoch){
 
-            memory_addresses << clk << " " << req.addr << " ";
-            if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
-            else if (req.type == Request::Type::READ)   memory_addresses << "R ";
-            else                                        memory_addresses << "NA ";
-            memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
-                             << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
-                             << req.addr_vec[int(HMC::Level::Column)] << "\n";
+          memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
+          if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
+          else if (req.type == Request::Type::READ)   memory_addresses << "R,";
+          else                                        memory_addresses << "NA,";
+          memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << "," << req.addr_vec[int(HMC::Level::BankGroup)] << ","
+                            << req.addr_vec[int(HMC::Level::Bank)] << ","  << req.addr_vec[int(HMC::Level::Row)]       << ","
+                            << req.addr_vec[int(HMC::Level::Column)] << "\n";
 
             instruction_counter++;
             if(instruction_counter >= 10000){
@@ -2825,13 +2871,13 @@ public:
           }
         }
 
-        memory_addresses << clk << " " << req.addr << " ";
-        if (req.type == Request::Type::WRITE)       memory_addresses << "W ";
-        else if (req.type == Request::Type::READ)   memory_addresses << "R ";
-        else                                        memory_addresses << "NA ";
-        memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << " " << req.addr_vec[int(HMC::Level::BankGroup)] << " "
-                         << req.addr_vec[int(HMC::Level::Bank)] << " "  << req.addr_vec[int(HMC::Level::Row)]       << " "
-                         << req.addr_vec[int(HMC::Level::Column)] << "\n";
+        memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
+        if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
+        else if (req.type == Request::Type::READ)   memory_addresses << "R,";
+        else                                        memory_addresses << "NA,";
+        memory_addresses << req.addr_vec[int(HMC::Level::Vault)] << "," << req.addr_vec[int(HMC::Level::BankGroup)] << ","
+                          << req.addr_vec[int(HMC::Level::Bank)] << ","  << req.addr_vec[int(HMC::Level::Row)]       << ","
+                          << req.addr_vec[int(HMC::Level::Column)] << "\n";
         return true;
     }
 
@@ -2911,6 +2957,9 @@ public:
       }
       ofs_o.close();
       memory_addresses.close();
+      adaptive_thresholds.close();
+      latencies_each_epoch.close();
+      feedback_reg_epoch.close();
       string to_open_hops_distribution = application_name+".hops_distribution.csv";
       ofstream hops_distribution_ofs(to_open_hops_distribution.c_str(), ofstream::out);
       hops_distribution_ofs << "Hops,Read,Write,Other,Total" << "\n";
