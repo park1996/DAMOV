@@ -170,7 +170,7 @@ public:
     long total_hmc_latency = 0;
     long total_latency = 0;
     long total_cycle_waiting_not_ready_request = 0;
-    function<void(long, int)> update_parent_with_latency;
+    function<void(long, int, vector<int>)> update_parent_with_latency;
 
     struct Queue {
         list<Request> q;
@@ -768,7 +768,7 @@ public:
                 total_hmc_latency += (req.depart_hmc - req.arrive_hmc);
                 total_latency += (req.depart - req.arrive);
                 if(update_parent_with_latency) {
-                    update_parent_with_latency(req.depart_hmc - req.arrive_hmc, req.coreid);
+                    update_parent_with_latency(req.depart_hmc - req.arrive_hmc, req.coreid, req.addr_vec);
                 }
                 if (req.type == Request::Type::READ || req.type == Request::Type::WRITE) {
                   req.callback(req);
@@ -971,7 +971,7 @@ public:
       (*record_write_conflicts)[coreid] = (*write_row_conflicts)[coreid];
     }
 
-    void attach_parent_update_latency_function(function<void(long, int)> partent_function) {
+    void attach_parent_update_latency_function(function<void(long, int, vector<int>)> partent_function) {
         update_parent_with_latency = partent_function;
     }
 

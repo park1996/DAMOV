@@ -788,12 +788,20 @@ public:
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
+      vector<int> available_thresholds = {0, 63};
+      unordered_map<int, int> set_to_thresholds;
+      int sample_set_size = 64;
+      vector<unordered_map<int, long>> latencies_for_diff_thresholds;
+      vector<unordered_map<int, int>> requests_completed_for_diff_thresholds;
+      vector<unordered_map<int, long>> max_latencies_for_diff_thresholds;
       uint64_t threshold_change_epoch = 100000;
       vector<uint64_t> prefetch_count_thresholds;
       uint64_t prefetch_maximum_count_threshold = 0;
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
       bool bimodel_adaptive_on = true;
+      bool magnitude_adaptive = true;
+      bool set_sampling_on = false;
       bool use_maximum_latency = false;
       int invert_latency_variance_threshold = 40;
       vector<int64_t> feedbacks;
@@ -802,7 +810,7 @@ public:
       vector<double> previous_latencies;
       vector<int> last_threshold_change;
       vector<long> maximum_latency_for_current_epoch;
-      long feedback_bits = 18;
+      long feedback_bits = 16;
       // Assuming we are using a 2's comp register with given # of bits to store this info
       int64_t feedback_maximum = (long)(1<<(feedback_bits-1)) - 1;
       int64_t feedback_minimum = -(feedback_maximum+1);
@@ -971,6 +979,22 @@ public:
           cout << "Bimodel Adaptive is off" << endl;
         }
       }
+      void set_magnitude_adaptive(bool flag) {
+        magnitude_adaptive = flag;
+        if(magnitude_adaptive) {
+          cout << "Magnitude adaptive is on" << endl;
+        } else {
+          cout << "Magnitude adaptive is off" << endl;
+        }
+      }
+      void set_set_sampling(bool flag) {
+        set_sampling_on = flag;
+        if(set_sampling_on) {
+          cout << "Set Sampling is on" << endl;
+        } else {
+          cout << "Set Sampling is off" << endl;
+        }
+      }
       void set_use_maximum_latency(bool flag) {
         use_maximum_latency = flag;
         if(use_maximum_latency) {
@@ -1047,13 +1071,31 @@ public:
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
         last_threshold_change.assign(controllers, -1);
         maximum_latency_for_current_epoch.assign(controllers, 0);
+        latencies_for_diff_thresholds.assign(controllers, unordered_map<int, long>());
+        requests_completed_for_diff_thresholds.assign(controllers, unordered_map<int, int>());
+        max_latencies_for_diff_thresholds.assign(controllers, unordered_map<int, long>());
         for(int c = 0; c < controllers; c++) {
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
         feedback_threshold = (long)(1<<(feedback_bits-1)) / ((long)count_table.get_count_upper_limit()+1);
+        int sampling_set = subscription_table_sets / 8;
+        for(auto threshold:available_thresholds) {
+          for(int i = 0; i < sample_set_size; i++) {
+            set_to_thresholds[sampling_set] = threshold;
+            sampling_set++;
+          }
+        }
       }
-      bool check_prefetch(uint64_t hops, uint64_t count, int vault) const {
-        // TODO: Use machine learning to optimize prefetching
+
+      bool check_prefetch(uint64_t hops, uint64_t count, int vault, vector<int> addr_vec) const {
+        if(set_sampling_on) {
+          long addr = mem_ptr -> address_vector_to_address(addr_vec);
+          int set = subscription_tables[0].get_set(addr);
+          if(set_to_thresholds.count(set) > 0) {
+            // cout << "Set " << set << " is a leader set which has threshold " << set_to_thresholds.at(set) << endl;
+            return hops >= prefetch_hops_threshold && count >= set_to_thresholds.at(set);
+          }
+        }
         return hops >= prefetch_hops_threshold && count >= prefetch_count_thresholds[vault];
       }
       long find_mirror_address(int vault, long addr) {
@@ -1580,21 +1622,9 @@ public:
           mem_ptr -> adaptive_thresholds << mem_ptr -> clk << ",";
           mem_ptr -> latencies_each_epoch << mem_ptr -> clk << ",";
           mem_ptr -> feedback_reg_epoch << mem_ptr -> clk << ",";
+          
           for(int c = 0; c < controllers; c++) {
-            int new_count_threshold = prefetch_count_thresholds[c];
-            // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
-            if(previous_latencies[c] == 0 || bimodel_adaptive_on) {
-              // if(feedbacks[c] > positive_feedback_threshold) {
-              //   // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
-              //   new_count_threshold++;
-              // } else if(feedbacks[c] < negative_feedback_threshold) {
-              //   // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
-              //   new_count_threshold--;
-              // }
-              new_count_threshold += -1*(feedbacks[c] / feedback_threshold);
-            }
             mem_ptr -> feedback_reg_epoch << feedbacks[c] << ",";
-
             double current_latency = 0;
             if(!use_maximum_latency) {
               if(requests_completed_for_current_epoch[c]) {
@@ -1604,30 +1634,82 @@ public:
               current_latency = maximum_latency_for_current_epoch[c];
             }
             mem_ptr -> latencies_each_epoch << current_latency << ",";
-            if(previous_latencies[c] > 0) {
-              double magnitude = current_latency / previous_latencies[c];
-              // 1/invert_latency_variance_threshold% difference = 1 hop change
-              int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
-              // cout << "The magnitude is " << magnitude << " our last change is " << last_threshold_change[c] << endl;
-              // if(change != 0) {
-              //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
-              // }
-              new_count_threshold += change;
+
+            int new_count_threshold = -1;
+            int exammined_thresholds = 0;
+            if(set_sampling_on) {
+              double min_avg_latency = (double)LONG_MAX;
+              for(auto threshold:available_thresholds) {
+                double current_threshold_latency = (double)LONG_MAX;
+                if(requests_completed_for_diff_thresholds[c].count(threshold)) {
+                  exammined_thresholds++;
+                  if(!use_maximum_latency) {
+                    current_threshold_latency = ((double)(latencies_for_diff_thresholds[c][threshold])) / ((double)(requests_completed_for_diff_thresholds[c][threshold]));
+                  } else {
+                    current_threshold_latency = (double)(max_latencies_for_diff_thresholds[c][threshold]);
+                  }
+                }
+                if(current_threshold_latency < min_avg_latency) {
+                  min_avg_latency = current_threshold_latency;
+                  new_count_threshold = threshold;
+                }
+              }
+              if(exammined_thresholds <= 1) {
+                // cout << "We exammined less than 2 thresholds for core " << c << ". Keeping the old threshold" << endl;
+                new_count_threshold = -1;
+              }
+              if(new_count_threshold != -1) {
+                // cout << "Threshold " << new_count_threshold << " for core " << c << " has latency " << min_avg_latency << " which is lower so we are using it" << endl;
+              }
             }
+
+
+            if(!set_sampling_on || (new_count_threshold == -1 && magnitude_adaptive)) {
+              new_count_threshold = prefetch_count_thresholds[c];
+              // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
+              if(previous_latencies[c] == 0 || bimodel_adaptive_on) {
+                // if(feedbacks[c] > positive_feedback_threshold) {
+                //   // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
+                //   new_count_threshold++;
+                // } else if(feedbacks[c] < negative_feedback_threshold) {
+                //   // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
+                //   new_count_threshold--;
+                // }
+                new_count_threshold += -1*(feedbacks[c] / feedback_threshold);
+              }
+
+              if(previous_latencies[c] > 0) {
+                double magnitude = current_latency / previous_latencies[c];
+                // 1/invert_latency_variance_threshold% difference = 1 hop change
+                int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
+                // cout << "The magnitude is " << magnitude << " our last change is " << last_threshold_change[c] << endl;
+                // if(change != 0) {
+                //   cout << "Change count threshold of vault " << c << " by " << change << " due to latencies" << endl;
+                // }
+                new_count_threshold += change;
+              }
+            }
+            
             previous_latencies[c] = current_latency;
             latencies_for_current_epoch[c] = 0;
             requests_completed_for_current_epoch[c] = 0;
             maximum_latency_for_current_epoch[c] = 0;
+            requests_completed_for_diff_thresholds[c] = unordered_map<int, int>();
+            latencies_for_diff_thresholds[c] = unordered_map<int, long>();
+            max_latencies_for_diff_thresholds[c] = unordered_map<int, long>();
 
-            if(new_count_threshold < (int)count_table.get_count_lower_limit()) {
-              // cout << "Pending new count threshold is " << new_count_threshold << " and it is lower than the lower limit of " << count_table.get_count_lower_limit() << endl;
-              new_count_threshold = (int)count_table.get_count_lower_limit();
-            }
-            if(new_count_threshold > (int)count_table.get_count_upper_limit()) {
-              // cout << "Pending new count threshold is " << new_count_threshold << " and it is higher than the higher limit of " << count_table.get_count_upper_limit() << endl;
-              new_count_threshold = (int)count_table.get_count_upper_limit();
-            }
             if(adaptive_threshold_changes) {
+              if(new_count_threshold == -1) {
+                new_count_threshold = prefetch_count_thresholds[c];
+              }
+              if(new_count_threshold < (int)count_table.get_count_lower_limit()) {
+                // cout << "Pending new count threshold is " << new_count_threshold << " and it is lower than the lower limit of " << count_table.get_count_lower_limit() << endl;
+                new_count_threshold = (int)count_table.get_count_lower_limit();
+              }
+              if(new_count_threshold > (int)count_table.get_count_upper_limit()) {
+                // cout << "Pending new count threshold is " << new_count_threshold << " and it is higher than the higher limit of " << count_table.get_count_upper_limit() << endl;
+                new_count_threshold = (int)count_table.get_count_upper_limit();
+              }
               if(new_count_threshold > prefetch_count_thresholds[c]) {
                 // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
                 total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
@@ -1637,17 +1719,16 @@ public:
                 total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
                 last_threshold_change[c] = -1;
               }
-
               if(new_count_threshold > prefetch_maximum_count_threshold) {
-                  prefetch_maximum_count_threshold = new_count_threshold;
+                prefetch_maximum_count_threshold = new_count_threshold;
               }
+              
 
               for(auto addr:subscription_tables[c].unused_subscriptions) {
                 unsubscribe_address(c, addr.first);
               }
 
               mem_ptr -> adaptive_thresholds << new_count_threshold << ",";
-              if(new_count_threshold > prefetch_count_thresholds[c])
               prefetch_count_thresholds[c] = new_count_threshold;
               subscription_tables[c].propogate_count_threshold(new_count_threshold);
               // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
@@ -1700,14 +1781,14 @@ public:
         uint64_t count = count_table.update_counter_table_and_get_count(req_vault_id, addr);
         // If the policy says that we should subscribe this address, we subscribe it to the requester's vault so it is closer when accessed in the future
         // We do not subscribe in the case that the original vault has the address pending subscription or removal, or when the subscription is already done to the requester vault
-        if(check_prefetch(hops, count, req_vault_id)) {
+        if(check_prefetch(hops, count, req_vault_id, req.addr_vec)) {
           print_debug_info("Checking subscription at vault "+to_string(req_vault_id)+" and address "+to_string(addr));
           print_debug_info("Is pending subscription? "+to_string(subscription_tables[req_vault_id].is_pending_subscription(addr)));
           print_debug_info("Is pending resubscription? "+to_string(subscription_tables[req_vault_id].is_pending_resubscription(addr)));
           print_debug_info("Is pending removal? "+to_string(subscription_tables[req_vault_id].is_pending_removal(addr)));
           print_debug_info("Is subscribed to "+to_string(req_vault_id)+"?"+to_string(subscription_tables[req_vault_id].is_subscribed(addr, req_vault_id)));
         }
-        if(check_prefetch(hops, count, req_vault_id) && !(
+        if(check_prefetch(hops, count, req_vault_id, req.addr_vec) && !(
             subscription_tables[req_vault_id].is_pending_subscription(addr)
             || subscription_tables[req_vault_id].is_pending_resubscription(addr) 
             || subscription_tables[req_vault_id].is_pending_removal(addr) 
@@ -1813,7 +1894,7 @@ public:
           total_threshold_decreases++;
         }
       }
-      void update_latency(long latency, int from_vault) {
+      void update_latency(long latency, int from_vault, vector<int> addr_vec) {
         if(!adaptive_threshold_changes) {
           return;
         }
@@ -1821,6 +1902,27 @@ public:
         requests_completed_for_current_epoch[from_vault]++;
         if(latency > maximum_latency_for_current_epoch[from_vault]) {
           maximum_latency_for_current_epoch[from_vault] = latency;
+        }
+        if(set_sampling_on) {
+          long addr = mem_ptr -> address_vector_to_address(addr_vec);
+          int set = subscription_tables[0].get_set(addr);
+          int threshold_for_this_set = -1;
+          if(set_to_thresholds.count(set) != 0) {
+            threshold_for_this_set = set_to_thresholds[set];
+          }
+          if(latencies_for_diff_thresholds[from_vault].count(threshold_for_this_set) > 0) {
+            latencies_for_diff_thresholds[from_vault][threshold_for_this_set] += latency;
+          } else {
+            latencies_for_diff_thresholds[from_vault][threshold_for_this_set] = latency;
+          }
+          if(requests_completed_for_diff_thresholds[from_vault].count(threshold_for_this_set) > 0) {
+            requests_completed_for_diff_thresholds[from_vault][threshold_for_this_set]++;
+          } else {
+            requests_completed_for_diff_thresholds[from_vault][threshold_for_this_set] = 1;
+          }
+          if(max_latencies_for_diff_thresholds[from_vault].count(threshold_for_this_set) <= 0 || latency > max_latencies_for_diff_thresholds[from_vault][threshold_for_this_set]) {
+            max_latencies_for_diff_thresholds[from_vault][threshold_for_this_set] = latency;
+          }
         }
       }
       void print_stats(){
@@ -2050,6 +2152,12 @@ public:
           }
           if (configs.contains("bimodel_adaptive")) {
             prefetcher_set.set_bimodel_adaptive(configs["bimodel_adaptive"] == "true");
+          }
+          if (configs.contains("magnitude_adaptive")) {
+            prefetcher_set.set_magnitude_adaptive(configs["magnitude_adaptive"] == "true");
+          }
+          if (configs.contains("set_sampling")) {
+            prefetcher_set.set_set_sampling(configs["set_sampling"] == "true");
           }
           if (configs.contains("use_maximum_latency")) {
             prefetcher_set.set_use_maximum_latency(configs["use_maximum_latency"] == "true");
@@ -2365,7 +2473,7 @@ public:
           ctrl->record_write_hits = &record_write_hits;
           ctrl->record_write_misses = &record_write_misses;
           ctrl->record_write_conflicts = &record_write_conflicts;
-          ctrl->attach_parent_update_latency_function(std::bind(&Memory<HMC, Controller>::SubscriptionPrefetcherSet::update_latency, &(this->prefetcher_set), std::placeholders::_1, std::placeholders::_2));
+          ctrl->attach_parent_update_latency_function(std::bind(&Memory<HMC, Controller>::SubscriptionPrefetcherSet::update_latency, &(this->prefetcher_set), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
         }
     }
 
