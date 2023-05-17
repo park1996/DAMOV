@@ -98,8 +98,11 @@ protected:
   long mem_req_count = 0;
   long total_hops = 0;
   long total_memory_accesses = 0;
-  bool num_cores;
+  int num_cores;
   int max_block_col_bits;
+  bool warmup_finished = false;
+  long clk_at_end_of_warmup = 0;
+  long warmup_reqs = 0;
   int network_width = 6;
   int network_height = 6;
   int max_hops = 70;
@@ -2139,6 +2142,10 @@ public:
           prefetcher_set.set_debug_flag(configs["print_debug_info"] == "true");
         }
 
+        if (configs.contains("warmup_reqs")) {
+          warmup_reqs = stol(configs["warmup_reqs"]);
+        }
+
         if (configs.contains("adaptive_threshold_change")) {
           prefetcher_set.set_adaptive_threshold_changes(configs["adaptive_threshold_change"] == "true");
           if (configs.contains("positive_feedback_threshold")) {
@@ -2731,6 +2738,12 @@ public:
       //  cout << "receive request packets@host controller with address " << req.addr << " from vault " << req.coreid << " at " << clk << endl;
         req._addr = req.addr;
         req.reqid = mem_req_count;
+        if(mem_req_count-1 >= warmup_reqs && !warmup_finished) {
+          warmup_finished = true;
+          clk_at_end_of_warmup = clk;
+          string sub_stats_to_open = application_name+".ramulator.subscription_stats.end_of_warmup";
+          write_sub_stats_file(sub_stats_to_open);
+        }
 
         // cout << "Address before bit operation is " << bitset<64>(req.addr) << endl;
         clear_higher_bits(req.addr, max_address-1ll);
@@ -2997,6 +3010,80 @@ public:
         return reqs;
     }
 
+    void write_sub_stats_file(string sub_stats_to_open) {
+      ofstream sub_stats_ofs(sub_stats_to_open.c_str(), ofstream::out);
+      if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+        sub_stats_ofs << "-----Prefetcher Stats-----" << "\n";
+        sub_stats_ofs << "MemAccesses: " << prefetcher_set.get_total_memory_accesses() << "\n";
+        sub_stats_ofs << "SubmittedSubscriptions: " << prefetcher_set.get_total_submitted_subscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulSubscriptions: " << prefetcher_set.get_total_successful_subscriptions() << "\n";
+        sub_stats_ofs << "UnsuccessfulSubscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulSubscriptionFromBuffer: " << prefetcher_set.get_total_subscription_from_buffer() << "\n";
+        sub_stats_ofs << "Unsubscriptions: " << prefetcher_set.get_total_unsubscriptions() << "\n";
+        sub_stats_ofs << "Resubscriptions: " << prefetcher_set.get_total_resubscriptions() << "\n";
+        sub_stats_ofs << "SuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_successful_insertation() << "\n";
+        sub_stats_ofs << "UnsuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_unsuccessful_insertation() << "\n";
+        sub_stats_ofs << "SubscriptionPktHopsTravelled: " << prefetcher_set.get_total_hops() << "\n";
+        sub_stats_ofs << "CountTableUpdates: " << prefetcher_set.get_count_table_insertions() << "\n";
+        sub_stats_ofs << "CountTableEvictions: " << prefetcher_set.get_count_table_evictions() << "\n";
+        sub_stats_ofs << "CountTableTotalCount: " << prefetcher_set.get_count_table_total_count_at_eviction() << "\n";
+        sub_stats_ofs << "CountTableAvgCount: " << prefetcher_set.get_count_table_avg_count_at_eviction() << "\n";
+        sub_stats_ofs << "CountTableUpdatesWithoutEviction: " << (prefetcher_set.get_count_table_insertions() - prefetcher_set.get_count_table_evictions()) << "\n";
+        sub_stats_ofs << "CountTableMaxCount: " << prefetcher_set.get_count_table_maximum_count() << "\n";
+        sub_stats_ofs << "TotalPosFeedback: " << prefetcher_set.get_total_positive_feedback() << "\n";
+        sub_stats_ofs << "TotalNegFeedback: " << prefetcher_set.get_total_negative_feedback() << "\n";
+        sub_stats_ofs << "TotalThresholdInc: " << prefetcher_set.get_total_threshold_increases() << "\n";
+        sub_stats_ofs << "TotalThresholdDec: " << prefetcher_set.get_total_threshold_decreases() << "\n";
+        sub_stats_ofs << "MaxCountThreshold: " << prefetcher_set.get_prefetch_maximum_count_threshold() << "\n";
+        sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
+      } else {
+        sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
+      }
+      sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";
+      long total_latency = 0;
+      long total_hmc_latency = 0;
+      long total_waiting_ready = 0;
+      long total_readq_pending = 0;
+      long total_writeq_pending = 0;
+      long total_otherq_pending = 0;
+      long total_overflow_pending = 0;
+      sub_stats_ofs << "-----Controller Stats-----" << "\n";
+      for(int c = 0; c < ctrls.size(); c++) {
+        sub_stats_ofs << "Controller" << c << "MaxReadQQSize: " << ctrls[c] -> readq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxWriteQQSize: " << ctrls[c] -> writeq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOtherQQSize: " << ctrls[c] -> otherq.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOverflowQSize: " << ctrls[c] -> overflow.max_q_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxReadQArrivelQSize: " << ctrls[c] -> readq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxWriteQArrivelQSize: " << ctrls[c] -> writeq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOtherQArrivelQSize: " << ctrls[c] -> otherq.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "MaxOverflowArrivelQSize: " << ctrls[c] -> overflow.max_arrivel_size << "\n";
+        sub_stats_ofs << "Controller" << c << "ReadQPending: " << ctrls[c] -> readq.total_pending_task << "\n";
+        total_readq_pending += ctrls[c] -> readq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "WriteQPending: " << ctrls[c] -> writeq.total_pending_task << "\n";
+        total_writeq_pending += ctrls[c] -> writeq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "OtherQPending: " << ctrls[c] -> otherq.total_pending_task << "\n";
+        total_otherq_pending += ctrls[c] -> otherq.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "OverflowPending: " << ctrls[c] -> overflow.total_pending_task << "\n";
+        total_overflow_pending += ctrls[c] -> overflow.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "WaitingReady: " << ctrls[c]->total_cycle_waiting_not_ready_request << "\n";
+        total_waiting_ready += ctrls[c]->total_cycle_waiting_not_ready_request;
+        sub_stats_ofs << "Controller" << c << "RequestLatency: " << ctrls[c]->total_latency << "\n";
+        total_latency += ctrls[c]->total_latency;
+        sub_stats_ofs << "Controller" << c << "HMCLatency: " << ctrls[c]->total_hmc_latency << "\n";
+        total_hmc_latency += ctrls[c]->total_hmc_latency;
+      }
+      sub_stats_ofs << "TotalWaitingReady: " << total_waiting_ready << "\n";
+      sub_stats_ofs << "TotalRequestLatency: " << total_latency << "\n";
+      sub_stats_ofs << "TotalHMCLatency: " << total_hmc_latency << "\n";
+      sub_stats_ofs << "MemoryRequests: " << mem_req_count << "\n";
+      sub_stats_ofs << "TotalReadQPending: " << total_readq_pending << "\n";
+      sub_stats_ofs << "TotalWriteQPending: " << total_writeq_pending << "\n";
+      sub_stats_ofs << "TotalOtherQPending: " << total_otherq_pending << "\n";
+      sub_stats_ofs << "TotalOverflowPending: " << total_overflow_pending << "\n";
+      sub_stats_ofs << "-----End Controller Stats-----" << "\n";  
+      sub_stats_ofs.close();
+    }
+
     void finish() {
       std::cout << "[RAMULATOR] Gathering stats \n";
 
@@ -3082,80 +3169,16 @@ public:
         network_cycle_ofs << i << "," << network_cycle_distribution[i] << "\n";
       }
       network_cycle_ofs.close();
+      string cycle_stats_to_open = application_name+".ramulator.cycle_stats";
+      ofstream cycle_stats_ofs(cycle_stats_to_open.c_str(), ofstream::out);
+      cycle_stats_ofs << "RamulatorCycleAtFinish: " << clk << "\n";
+      cycle_stats_ofs << "WarmupCycles: " << clk_at_end_of_warmup << "\n";
+      cycle_stats_ofs.close();
       string sub_stats_to_open = application_name+".ramulator.subscription_stats";
-      ofstream sub_stats_ofs(sub_stats_to_open.c_str(), ofstream::out);
-      if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
-        prefetcher_set.print_stats();
-        sub_stats_ofs << "-----Prefetcher Stats-----" << "\n";
-        sub_stats_ofs << "MemAccesses: " << prefetcher_set.get_total_memory_accesses() << "\n";
-        sub_stats_ofs << "SubmittedSubscriptions: " << prefetcher_set.get_total_submitted_subscriptions() << "\n";
-        sub_stats_ofs << "SuccessfulSubscriptions: " << prefetcher_set.get_total_successful_subscriptions() << "\n";
-        sub_stats_ofs << "UnsuccessfulSubscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
-        sub_stats_ofs << "SuccessfulSubscriptionFromBuffer: " << prefetcher_set.get_total_subscription_from_buffer() << "\n";
-        sub_stats_ofs << "Unsubscriptions: " << prefetcher_set.get_total_unsubscriptions() << "\n";
-        sub_stats_ofs << "Resubscriptions: " << prefetcher_set.get_total_resubscriptions() << "\n";
-        sub_stats_ofs << "SuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_successful_insertation() << "\n";
-        sub_stats_ofs << "UnsuccessfulInsertationToBuffer: " << prefetcher_set.get_total_buffer_unsuccessful_insertation() << "\n";
-        sub_stats_ofs << "SubscriptionPktHopsTravelled: " << prefetcher_set.get_total_hops() << "\n";
-        sub_stats_ofs << "CountTableUpdates: " << prefetcher_set.get_count_table_insertions() << "\n";
-        sub_stats_ofs << "CountTableEvictions: " << prefetcher_set.get_count_table_evictions() << "\n";
-        sub_stats_ofs << "CountTableTotalCount: " << prefetcher_set.get_count_table_total_count_at_eviction() << "\n";
-        sub_stats_ofs << "CountTableAvgCount: " << prefetcher_set.get_count_table_avg_count_at_eviction() << "\n";
-        sub_stats_ofs << "CountTableUpdatesWithoutEviction: " << (prefetcher_set.get_count_table_insertions() - prefetcher_set.get_count_table_evictions()) << "\n";
-        sub_stats_ofs << "CountTableMaxCount: " << prefetcher_set.get_count_table_maximum_count() << "\n";
-        sub_stats_ofs << "TotalPosFeedback: " << prefetcher_set.get_total_positive_feedback() << "\n";
-        sub_stats_ofs << "TotalNegFeedback: " << prefetcher_set.get_total_negative_feedback() << "\n";
-        sub_stats_ofs << "TotalThresholdInc: " << prefetcher_set.get_total_threshold_increases() << "\n";
-        sub_stats_ofs << "TotalThresholdDec: " << prefetcher_set.get_total_threshold_decreases() << "\n";
-        sub_stats_ofs << "MaxCountThreshold: " << prefetcher_set.get_prefetch_maximum_count_threshold() << "\n";
-        sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
-      } else {
-        sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
-      }
+      write_sub_stats_file(sub_stats_to_open);
+      prefetcher_set.print_stats();
       cout << "Total number of hops travelled: " << total_hops << endl;
-      sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";
-      long total_latency = 0;
-      long total_hmc_latency = 0;
-      long total_waiting_ready = 0;
-      long total_readq_pending = 0;
-      long total_writeq_pending = 0;
-      long total_otherq_pending = 0;
-      long total_overflow_pending = 0;
-      sub_stats_ofs << "-----Controller Stats-----" << "\n";
-      for(int c = 0; c < ctrls.size(); c++) {
-        sub_stats_ofs << "Controller" << c << "MaxReadQQSize: " << ctrls[c] -> readq.max_q_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxWriteQQSize: " << ctrls[c] -> writeq.max_q_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxOtherQQSize: " << ctrls[c] -> otherq.max_q_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxOverflowQSize: " << ctrls[c] -> overflow.max_q_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxReadQArrivelQSize: " << ctrls[c] -> readq.max_arrivel_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxWriteQArrivelQSize: " << ctrls[c] -> writeq.max_arrivel_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxOtherQArrivelQSize: " << ctrls[c] -> otherq.max_arrivel_size << "\n";
-        sub_stats_ofs << "Controller" << c << "MaxOverflowArrivelQSize: " << ctrls[c] -> overflow.max_arrivel_size << "\n";
-        sub_stats_ofs << "Controller" << c << "ReadQPending: " << ctrls[c] -> readq.total_pending_task << "\n";
-        total_readq_pending += ctrls[c] -> readq.total_pending_task;
-        sub_stats_ofs << "Controller" << c << "WriteQPending: " << ctrls[c] -> writeq.total_pending_task << "\n";
-        total_writeq_pending += ctrls[c] -> writeq.total_pending_task;
-        sub_stats_ofs << "Controller" << c << "OtherQPending: " << ctrls[c] -> otherq.total_pending_task << "\n";
-        total_otherq_pending += ctrls[c] -> otherq.total_pending_task;
-        sub_stats_ofs << "Controller" << c << "OverflowPending: " << ctrls[c] -> overflow.total_pending_task << "\n";
-        total_overflow_pending += ctrls[c] -> overflow.total_pending_task;
-        sub_stats_ofs << "Controller" << c << "WaitingReady: " << ctrls[c]->total_cycle_waiting_not_ready_request << "\n";
-        total_waiting_ready += ctrls[c]->total_cycle_waiting_not_ready_request;
-        sub_stats_ofs << "Controller" << c << "RequestLatency: " << ctrls[c]->total_latency << "\n";
-        total_latency += ctrls[c]->total_latency;
-        sub_stats_ofs << "Controller" << c << "HMCLatency: " << ctrls[c]->total_hmc_latency << "\n";
-        total_hmc_latency += ctrls[c]->total_hmc_latency;
-      }
-      sub_stats_ofs << "TotalWaitingReady: " << total_waiting_ready << "\n";
-      sub_stats_ofs << "TotalRequestLatency: " << total_latency << "\n";
-      sub_stats_ofs << "TotalHMCLatency: " << total_hmc_latency << "\n";
-      sub_stats_ofs << "MemoryRequests: " << mem_req_count << "\n";
-      sub_stats_ofs << "TotalReadQPending: " << total_readq_pending << "\n";
-      sub_stats_ofs << "TotalWriteQPending: " << total_writeq_pending << "\n";
-      sub_stats_ofs << "TotalOtherQPending: " << total_otherq_pending << "\n";
-      sub_stats_ofs << "TotalOverflowPending: " << total_overflow_pending << "\n";
-      sub_stats_ofs << "-----End Controller Stats-----" << "\n";  
-      sub_stats_ofs.close();
+
       string address_access_count_to_open = application_name+".ramulator.address_access_count.csv";
       ofstream address_access_count_ofs(address_access_count_to_open.c_str(), ofstream::out);
       address_access_count_ofs << "Address,Original Vault,Count\n";
