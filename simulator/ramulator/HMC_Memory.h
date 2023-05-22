@@ -1697,6 +1697,7 @@ public:
             latencies_for_current_epoch[c] = 0;
             requests_completed_for_current_epoch[c] = 0;
             maximum_latency_for_current_epoch[c] = 0;
+            feedbacks[c] = 0;
             requests_completed_for_diff_thresholds[c] = unordered_map<int, int>();
             latencies_for_diff_thresholds[c] = unordered_map<int, long>();
             max_latencies_for_diff_thresholds[c] = unordered_map<int, long>();
@@ -1721,6 +1722,8 @@ public:
                 // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
                 total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
                 last_threshold_change[c] = -1;
+              } else {
+                last_threshold_change[c] = 0;
               }
               if(new_count_threshold > prefetch_maximum_count_threshold) {
                 prefetch_maximum_count_threshold = new_count_threshold;
