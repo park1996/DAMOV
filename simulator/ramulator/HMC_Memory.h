@@ -263,8 +263,10 @@ public:
         int hops;
         bool dirty = false;
         bool from_buffer = false;
+        int count = 0;
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty){}
+        SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, int count):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),count(count){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty, bool from_buffer):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty),from_buffer(from_buffer){}
         SubscriptionTask(){}
       };
@@ -773,6 +775,15 @@ public:
           }
           return count_tables[req_vault][index].count;
         }
+        int get_count(int req_vault, long addr) {
+          int count = -1;
+          uint64_t tag = calculate_tag(addr);
+          int index = addr % counter_table_size;
+          if(count_tables[req_vault][index].tag == tag){
+            count = (int)count_tables[req_vault][index].count;
+          }
+          return count;
+        }
         vector<CountTableEntry>& operator[](const size_t& i) {return count_tables[i];}
         void print_stats(){
           cout << "We have accessed " << insertions << " times to the counter table " << " and evicted " << evictions << " from it. The number of accesses without eviction is " << (insertions - evictions) << endl;
@@ -1115,7 +1126,9 @@ public:
         int original_vault = find_original_vault_of_address(addr);
         int hops = mem_ptr -> calculate_hops_travelled(req_vault, original_vault);
         // Generate a "Subscription Request" task
-        SubscriptionTask task = SubscriptionTask(addr, req_vault, original_vault, hops, SubscriptionTask::Type::SubReq);
+        int count = count_table.get_count(req_vault, addr);
+        // cout << "Triggering subscription for address " << addr << " from vault " << req_vault << " to " << original_vault << " with count " << count << endl;
+        SubscriptionTask task = SubscriptionTask(addr, req_vault, original_vault, hops, SubscriptionTask::Type::SubReq, count);
         // cout << "SubReq task generated from " << task.from_vault << " to " << task.to_vault << " addr " << task.addr << endl;
         // If the original vault of the address is the current vault (i.e. we have an address subscribed elsewhere and we want it back), we need to process unsubscription
         if(original_vault == req_vault) {
@@ -1180,13 +1193,17 @@ public:
         // Starting by reserving space in the subscription table. For swap we need 2 entries (one for the actual subscription, one for the swapped out address)
         // If the address is already subscribed (to somewhere else), we do not need any space for it as we can use the existing entry
         int required_space = subscription_tables[task.to_vault].is_subscribed(task.addr) ? (swap ? 1 : 0) : (swap ? 2 : 1);
+        int local_count = count_table.get_count(task.to_vault, task.addr);
+        // if(task.count < local_count)
+        // cout << "Receiving subscription for address " << task.addr << " from vault " << task.from_vault << " to " << task.to_vault << " with count " << task.count << " and local count " << local_count << endl;
         // If we have space in subscription table to put it in, and receiving buffer to receive the swapped out address in the case of swap, we proceed with subscription
         if(subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space)
-          && subscription_tables[task.to_vault].receive_buffer_is_free()) {
+          && subscription_tables[task.to_vault].receive_buffer_is_free()
+          && task.count > local_count) {
           process_subscribe_request(task);
         // If not, but we have some space in the buffer, we insert it into the buffer
         } else {
-          if(subscription_buffers[task.to_vault].is_free(task.addr)) {
+          if(subscription_buffers[task.to_vault].is_free(task.addr) && task.count > local_count) {
             total_buffer_successful_insertation++;
             print_debug_info("Pushing task "+to_string(task.addr)+" from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" into the buffer at receiver");
             subscription_buffers[task.to_vault].push_back(task);
@@ -1199,9 +1216,12 @@ public:
             pending.push_back(SubscriptionTask(task.addr, task.to_vault, task.from_vault, hops+pending_send[task.to_vault], SubscriptionTask::Type::SubReqNAck, task.dirty, task.from_buffer));
             pending_send[task.to_vault]+=1;
           }
-          long victim_addr = find_victim_for_unsubscription(task.to_vault, task.addr);
-          print_debug_info("unsubscribe_address() 3");
-          unsubscribe_address(task.to_vault, victim_addr);
+          if(!subscription_tables[task.to_vault].subscription_table_is_free(task.addr, required_space)
+            || !subscription_tables[task.to_vault].receive_buffer_is_free()) {
+            long victim_addr = find_victim_for_unsubscription(task.to_vault, task.addr);
+            print_debug_info("unsubscribe_address() 3");
+            unsubscribe_address(task.to_vault, victim_addr);
+          }
         }
       }
       // Finish processing subscription request
