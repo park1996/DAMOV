@@ -52,7 +52,7 @@ for hops in hops_thresholds:
 for debug_flag in debug_flags:
     for prefetcher_type in prefetcher_types:
         for core_number in core_numbers:
-            generate_config_file(prefetcher_type, debug_flag, "7", "1", "true", "adaptive", core_number)
+            generate_config_file(prefetcher_type, debug_flag, "0", "1", "true", "adaptive", core_number)
 
 no_pf_template_dir = os.path.join(ramulator_config_dir, "HMC-config.cfg")
 for debug_flag in debug_flags:
