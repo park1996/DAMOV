@@ -38,6 +38,7 @@ protected:
   ofstream latencies_each_epoch;
   ofstream feedback_reg_epoch;
   ofstream adaptive_thresholds_record;
+  ofstream set_sampling_result;
 
 
 
@@ -184,6 +185,8 @@ public:
         feedback_reg_epoch << "Core " << i << ",";
       }
       feedback_reg_epoch << "\n";
+      string set_sampling_result_to_open = application_name+".set_sampling_result.csv";
+      set_sampling_result.open(set_sampling_result_to_open.c_str(), std::ofstream::out);
     }
 
     void set_adaptive_threshold_recorder () {
@@ -829,7 +832,7 @@ public:
       uint64_t prefetch_count_threshold = 1;
       vector<int> available_thresholds = {0, 63};
       unordered_map<int, int> set_to_thresholds;
-      int sample_set_size = 64;
+      int sample_set_size = 128;
       vector<unordered_map<int, long>> latencies_for_diff_thresholds;
       vector<unordered_map<int, int>> requests_completed_for_diff_thresholds;
       vector<unordered_map<int, long>> max_latencies_for_diff_thresholds;
@@ -946,7 +949,6 @@ public:
     public:
       explicit SubscriptionPrefetcherSet(int controllers, Memory<HMC, Controller>* mem_ptr):controllers(controllers),mem_ptr(mem_ptr) {
         cout << "Initialize subscription table with " << controllers << " vaults." << endl;
-        tailing_zero = mem_ptr -> tx_bits + 1;
         count_table.set_controllers(controllers);
       }
       void print_debug_info(const string& info) {
@@ -1122,12 +1124,23 @@ public:
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
         feedback_threshold = (long)(1<<(feedback_bits-1)) / ((long)count_table.get_count_upper_limit()+1);
-        int sampling_set = subscription_table_sets / 8;
+        // int sampling_set = subscription_table_sets / 8;
+        int sampling_set = subscription_table_sets - 1;
         for(auto threshold:available_thresholds) {
           for(int i = 0; i < sample_set_size; i++) {
             set_to_thresholds[sampling_set] = threshold;
-            sampling_set++;
+            sampling_set--;
           }
+        }
+
+        if(set_sampling_on) {
+          mem_ptr -> set_sampling_result << "Epoch End Cycle,";
+          for(int i = 0; i < controllers; i++) {
+            for(auto threshold:available_thresholds) {
+              mem_ptr -> set_sampling_result << "Core " << i << " Threshold " << threshold << ",";
+            }
+          }
+          mem_ptr -> set_sampling_result << "\n";
         }
       }
 
@@ -1669,6 +1682,7 @@ public:
           mem_ptr -> latencies_each_epoch << mem_ptr -> clk << ",";
           mem_ptr -> feedback_reg_epoch << mem_ptr -> clk << ",";
           mem_ptr -> adaptive_thresholds_record << mem_ptr -> clk << ",";
+          mem_ptr -> set_sampling_result << mem_ptr -> clk << ",";
           
           for(int c = 0; c < controllers; c++) {
             mem_ptr -> feedback_reg_epoch << feedbacks[c] << ",";
@@ -1692,10 +1706,16 @@ public:
                 if(feedbacks_for_diff_thresholds[c].count(threshold)) {
                   current_feedback = feedbacks_for_diff_thresholds[c][threshold];
                 }
+                if(threshold >= (int)count_table.get_count_upper_limit()) {
+                  // cout << "Threshold " << threshold << " is greater than or equal to the upper limit " << (int)count_table.get_count_upper_limit() << " set to 0" << endl;
+                  current_feedback = 0;
+                }
                 if(current_feedback > max_feedback) {
                   max_feedback = current_feedback;
                   new_count_threshold = threshold;
                 }
+                // cout << "At cycle " << mem_ptr -> clk << " Core " << c << " threshold " << threshold << " has feedback " << current_feedback << endl;
+                mem_ptr -> set_sampling_result << current_feedback << ",";
               }
               // double min_avg_latency = (double)LONG_MAX;
               // for(auto threshold:available_thresholds) {
@@ -1808,6 +1828,7 @@ public:
           mem_ptr -> latencies_each_epoch <<  "\n";
           mem_ptr -> feedback_reg_epoch <<  "\n";
           mem_ptr -> adaptive_thresholds_record << "\n";
+          mem_ptr -> set_sampling_result << "\n";
         }
       }
       void pre_process_addr(long& addr) {
@@ -2842,7 +2863,7 @@ public:
           write_sub_stats_file(sub_stats_to_open);
         }
 
-        // cout << "Address before bit operation is " << bitset<64>(req.addr) << endl;
+        // cout << "Raw address " << req._addr << " Address before bit operation is " << bitset<64>(req.addr) << endl;
         clear_higher_bits(req.addr, max_address-1ll);
         // cout << "Address after clear higher bits is" << bitset<64>(req.addr) << endl;
         long addr = req.addr;
@@ -2850,8 +2871,9 @@ public:
 
         // Each transaction size is 2^tx_bits, so first clear the lowest tx_bits bits
         clear_lower_bits(addr, tx_bits);
-        // cout << "Address after clear lower bits is " << bitset<64>(addr) << endl;
+        // cout << "Address after clear lower bits is " << bitset<64>(addr);
         vector<int> addr_vec = address_to_address_vector(addr);
+        // cout << " with vault " << addr_vec[int(HMC::Level::Vault)] << " bank group " << addr_vec[int(HMC::Level::BankGroup)] << " bank " << addr_vec[int(HMC::Level::Bank)] << " row " << addr_vec[int(HMC::Level::Row)] << " column " << addr_vec[int(HMC::Level::Column)] << endl;
         // assert(address_vector_to_address(addr_vec) == addr); // Test script to make sure the implementation is correct.
         req.addr_vec = addr_vec;
         int original_vault = req.addr_vec[int(HMC::Level::Vault)];
@@ -3257,6 +3279,9 @@ public:
       memory_addresses.close();
       adaptive_thresholds.close();
       adaptive_thresholds_record.close();
+      if(set_sampling_result.is_open()) {
+        set_sampling_result.close();
+      }
       latencies_each_epoch.close();
       feedback_reg_epoch.close();
       string to_open_hops_distribution = application_name+".hops_distribution.csv";
