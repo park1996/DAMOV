@@ -35,6 +35,8 @@ public:
     long arrive = -1;
     long depart;
     long arrive_hmc;
+    long finish_transfer;
+    long finish_queuing;
     long depart_hmc;
     unsigned hops = 0;
     int served_without_hops = 0;

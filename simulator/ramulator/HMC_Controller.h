@@ -169,8 +169,15 @@ public:
     Refresh<HMC>* refresh;
     long total_hmc_latency = 0;
     long total_latency = 0;
+    long total_transfer_latency = 0;
+    long total_in_memory_latency = 0;
     long total_cycle_waiting_not_ready_request = 0;
-    function<void(long, int, vector<int>)> update_parent_with_latency;
+    long total_process_latency = 0;
+    long total_incoming_queuing_latency = 0;
+    long total_outgoing_queuing_latency = 0;
+    long total_bursts = 0;
+    long stalled_cycles = 0;
+    function<void(const Request&)> update_parent_with_latency;
 
     struct Queue {
         list<Request> q;
@@ -184,11 +191,12 @@ public:
           cout << "Queue size is: " << this -> max << endl;
         }
         unsigned int size() {return arrivel_q.size() + q.size();}
-        void update(){
+        void update(long clk){
           list<Request> tmp;
           for (auto& i : arrivel_q) {
             if(i.hops == 0){
               total_pending_task+=q.size();
+              i.finish_transfer = clk;
               q.push_back(i);
               continue;
             }
@@ -205,6 +213,7 @@ public:
         }
         void arrive(Request& req) {
             if(req.hops == 0) {
+                req.finish_transfer = req.arrive;
                 q.push_back(req);
             } else {
                 arrivel_q.push_back(req);
@@ -752,9 +761,9 @@ public:
         (*write_req_queue_length_sum) += writeq.size();
 
 
-        readq.update();
-        writeq.update();
-        otherq.update();
+        readq.update(clk);
+        writeq.update(clk);
+        otherq.update(clk);
         /*** 1. Serve completed reads ***/
         if (pending.size()) {
           Request& req = pending[0];
@@ -767,8 +776,21 @@ public:
                 req.depart_hmc = clk;
                 total_hmc_latency += (req.depart_hmc - req.arrive_hmc);
                 total_latency += (req.depart - req.arrive);
+                total_transfer_latency += (req.finish_transfer - req.arrive);
+                total_in_memory_latency += (req.depart - req.finish_transfer);
+                total_process_latency += (req.depart - req.finish_queuing);
+                total_outgoing_queuing_latency += (req.finish_queuing - req.finish_transfer);
+                total_incoming_queuing_latency += (req.depart_hmc - req.depart);
+                // cout << "Req with address " << req.addr << " started at " << req.arrive << " finished transfer at " << req.finish_transfer << " finished queuing at " << req.finish_queuing << " departed HMC at " << req.depart_hmc << endl;
+                assert(total_hmc_latency >= 0);
+                assert(total_latency >= 0);
+                assert(total_transfer_latency >= 0);
+                assert(total_in_memory_latency >= 0);
+                assert(total_process_latency >= 0);
+                assert(total_outgoing_queuing_latency >= 0); 
+                assert(total_incoming_queuing_latency >= 0); 
                 if(update_parent_with_latency) {
-                    update_parent_with_latency(req.depart_hmc - req.arrive_hmc, req.coreid, req.addr_vec);
+                    update_parent_with_latency(req);
                 }
                 if (req.type == Request::Type::READ || req.type == Request::Type::WRITE) {
                   req.callback(req);
@@ -827,6 +849,8 @@ public:
           }
         }
         if (req->is_first_command) {
+          req->finish_queuing = clk;
+          total_bursts += req->burst_count;
           req->is_first_command = false;
           int coreid = req->coreid;
           if (req->type == Request::Type::READ || req->type == Request::Type::WRITE) {
@@ -869,6 +893,7 @@ public:
 
         // check whether this is the last command (which finishes the request)
         if (cmd != channel->spec->translate[int(req->type)]){
+            stalled_cycles++;
             return;
         }
 
@@ -971,7 +996,7 @@ public:
       (*record_write_conflicts)[coreid] = (*write_row_conflicts)[coreid];
     }
 
-    void attach_parent_update_latency_function(function<void(long, int, vector<int>)> partent_function) {
+    void attach_parent_update_latency_function(function<void(const Request&)> partent_function) {
         update_parent_with_latency = partent_function;
     }
 
