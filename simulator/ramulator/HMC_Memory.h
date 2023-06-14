@@ -844,13 +844,18 @@ public:
       bool bimodel_adaptive_on = true;
       bool magnitude_adaptive = true;
       bool set_sampling_on = false;
+      bool use_global_adaptive = false;
       bool use_maximum_latency = false;
       int invert_latency_variance_threshold = 40;
       vector<int64_t> feedbacks;
+      int64_t global_feedback;
       vector<unordered_map<int, int64_t>> feedbacks_for_diff_thresholds;
       vector<long> latencies_for_current_epoch;
+      long global_latencies;
       vector<int> requests_completed_for_current_epoch;
+      long global_requests;
       vector<double> previous_latencies;
+      double global_previous_latencies;
       vector<int> last_threshold_change;
       vector<long> maximum_latency_for_current_epoch;
       long feedback_bits = 20;
@@ -1037,6 +1042,15 @@ public:
           cout << "Set Sampling is off" << endl;
         }
       }
+      void set_use_global_adaptive(bool flag) {
+        use_global_adaptive = flag;
+        if(use_global_adaptive) {
+          cout << "Global adaptive is on" << endl;
+        } else {
+          cout << "Global adaptive is off" << endl;
+        }
+      }
+      bool get_use_global_adaptive() const{return use_global_adaptive;}
       void set_use_maximum_latency(bool flag) {
         use_maximum_latency = flag;
         if(use_maximum_latency) {
@@ -1113,6 +1127,10 @@ public:
           subscription_tables[c].attach_subscription_buffer(&subscription_buffers[c]);
           subscription_buffers[c].attach_subscription_table(&subscription_tables[c]);
         }
+        global_feedback = 0;
+        global_latencies = 0;
+        global_previous_latencies = 0.0;
+        global_requests = 0;
         pending_send.assign(controllers, 0);
         feedbacks.assign(controllers, 0);
         latencies_for_current_epoch.assign(controllers, 0);
@@ -1689,10 +1707,14 @@ public:
           mem_ptr -> feedback_reg_epoch << mem_ptr -> clk << ",";
           mem_ptr -> adaptive_thresholds_record << mem_ptr -> clk << ",";
           mem_ptr -> set_sampling_result << mem_ptr -> clk << ",";
+          double global_average_latency = 0;
+          if(global_requests) {
+            global_average_latency = ((double)global_latencies) / ((double)global_requests);
+          }
           
           for(int c = 0; c < controllers; c++) {
-            mem_ptr -> feedback_reg_epoch << feedbacks[c] << ",";
-            mem_ptr -> adaptive_thresholds_record << feedbacks[c] << ",";
+            mem_ptr -> feedback_reg_epoch << (use_global_adaptive ? global_feedback : feedbacks[c]) << ",";
+            mem_ptr -> adaptive_thresholds_record << (use_global_adaptive ? global_feedback : feedbacks[c]) << ",";
             double current_latency = 0;
             if(!use_maximum_latency) {
               if(requests_completed_for_current_epoch[c]) {
@@ -1701,7 +1723,7 @@ public:
             } else {
               current_latency = maximum_latency_for_current_epoch[c];
             }
-            mem_ptr -> latencies_each_epoch << current_latency << ",";
+            mem_ptr -> latencies_each_epoch << (use_global_adaptive ? global_average_latency : current_latency) << ",";
 
             int new_count_threshold = -1;
             int exammined_thresholds = 0;
@@ -1758,7 +1780,7 @@ public:
             if(!set_sampling_on || (new_count_threshold == -1 && magnitude_adaptive)) {
               new_count_threshold = prefetch_count_thresholds[c];
               // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
-              if(previous_latencies[c] == 0 || bimodel_adaptive_on) {
+              if((use_global_adaptive ? global_previous_latencies : previous_latencies[c]) == 0 || bimodel_adaptive_on) {
                 // if(feedbacks[c] > positive_feedback_threshold) {
                 //   // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
                 //   new_count_threshold++;
@@ -1766,11 +1788,15 @@ public:
                 //   // cout << "Decrease the count threshold of vault " << c << " by one due to hops" << endl;
                 //   new_count_threshold--;
                 // }
-                new_count_threshold += -1*(feedbacks[c] / feedback_threshold);
+                new_count_threshold += -1*((use_global_adaptive ? global_feedback : feedbacks[c]) / feedback_threshold);
               }
 
               if(previous_latencies[c] > 0) {
-                magnitude = current_latency / previous_latencies[c];
+                if(use_global_adaptive){
+                  magnitude = global_average_latency / global_previous_latencies;
+                } else {
+                  magnitude = current_latency / previous_latencies[c];
+                }
                 // 1/invert_latency_variance_threshold% difference = 1 hop change
                 int change = floor((magnitude-1)*invert_latency_variance_threshold)*(-1)*last_threshold_change[c];
                 // cout << "The magnitude is " << magnitude << " our last change is " << last_threshold_change[c] << endl;
@@ -1783,6 +1809,7 @@ public:
             mem_ptr -> adaptive_thresholds_record << magnitude << ",";
             mem_ptr -> adaptive_thresholds_record << last_threshold_change[c] << ",";
             
+
             previous_latencies[c] = current_latency;
             latencies_for_current_epoch[c] = 0;
             requests_completed_for_current_epoch[c] = 0;
@@ -1836,6 +1863,10 @@ public:
               // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
             }
           }
+          global_previous_latencies = global_average_latency;
+          global_feedback = 0;
+          global_latencies = 0;
+          global_requests = 0;
           mem_ptr -> adaptive_thresholds << "\n";
           mem_ptr -> latencies_each_epoch <<  "\n";
           mem_ptr -> feedback_reg_epoch <<  "\n";
@@ -1948,6 +1979,10 @@ public:
         if(feedbacks[vault] > feedback_maximum) {
           feedbacks[vault] = feedback_maximum;
         }
+        global_feedback += hops_diff;
+        if(global_feedback > feedback_maximum) {
+          global_feedback = feedback_maximum;
+        }
         // cout << " to " << feedbacks[vault] << endl;
         // cout << "The maximum feedback is " << feedback_maximum << " the minimum is" << feedback_minimum << endl;
         total_positive_feedback++;
@@ -1982,6 +2017,10 @@ public:
         feedbacks[vault]-=hops_diff;
         if(feedbacks[vault] < feedback_minimum) {
           feedbacks[vault] = feedback_minimum;
+        }
+        global_feedback -= hops_diff;
+        if(global_feedback < feedback_minimum) {
+          global_feedback = feedback_minimum;
         }
         // cout << " to " << feedbacks[vault] << endl; 
         total_negative_feedback++;
@@ -2041,7 +2080,9 @@ public:
         long latency = req.depart_hmc - req.arrive_hmc;
         int from_vault = req.coreid;
         latencies_for_current_epoch[from_vault] += latency;
+        global_latencies += latency;
         requests_completed_for_current_epoch[from_vault]++;
+        global_requests++;
         if(latency > maximum_latency_for_current_epoch[from_vault]) {
           maximum_latency_for_current_epoch[from_vault] = latency;
         }
@@ -2307,6 +2348,9 @@ public:
           }
           if (configs.contains("set_sampling")) {
             prefetcher_set.set_set_sampling(configs["set_sampling"] == "true");
+          }
+          if (configs.contains("use_global_adaptive")) {
+            prefetcher_set.set_use_global_adaptive(configs["use_global_adaptive"] == "true");
           }
           if (configs.contains("use_maximum_latency")) {
             prefetcher_set.set_use_maximum_latency(configs["use_maximum_latency"] == "true");
@@ -2996,7 +3040,7 @@ public:
               if(actual_hops > no_prefetcher_hops) {
                 // cout << "No prefetch hop is " << no_prefetcher_hops << " and prefetch hop is " << hops << " submitting negative feedback" << endl;
                 prefetcher_set.record_negative_feedback(requester_vault, actual_hops-no_prefetcher_hops, actual_hops, req);
-                if(requester_vault != subscribed_vault) {
+                if(requester_vault != subscribed_vault && !prefetcher_set.get_use_global_adaptive()) {
                   prefetcher_set.record_negative_feedback(subscribed_vault, actual_hops-no_prefetcher_hops, actual_hops, req);
                 }
                 // prefetcher_set.record_negative_feedback(requester_vault, 1, actual_hops);
