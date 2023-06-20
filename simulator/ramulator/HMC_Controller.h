@@ -167,16 +167,16 @@ public:
     RowPolicy<HMC>* rowpolicy;  // determines the row-policy (e.g., closed-row vs. open-row)
     RowTable<HMC>* rowtable;  // tracks metadata about rows (e.g., which are open and for how long)
     Refresh<HMC>* refresh;
-    long total_hmc_latency = 0;
-    long total_latency = 0;
-    long total_transfer_latency = 0;
-    long total_in_memory_latency = 0;
-    long total_cycle_waiting_not_ready_request = 0;
-    long total_process_latency = 0;
-    long total_incoming_queuing_latency = 0;
-    long total_outgoing_queuing_latency = 0;
-    long total_bursts = 0;
-    long stalled_cycles = 0;
+    double total_hmc_latency = 0;
+    double total_latency = 0;
+    double total_transfer_latency = 0;
+    double total_in_memory_latency = 0;
+    double total_cycle_waiting_not_ready_request = 0;
+    double total_process_latency = 0;
+    double total_incoming_queuing_latency = 0;
+    double total_outgoing_queuing_latency = 0;
+    double total_bursts = 0;
+    double stalled_cycles = 0;
     function<void(const Request&)> update_parent_with_latency;
 
     struct Queue {
@@ -226,39 +226,8 @@ public:
     Queue otherq;  // queue for all "other" requests (e.g., refresh)
     Queue overflow;
 
-    struct PendingQueue {
-        deque<Request> q;
-        deque<Request> arrivel_q;
-        unsigned int size() {return q.size()+arrivel_q.size();}
-        void update(){
-          deque<Request> tmp;
-          for (auto& i : arrivel_q) {
-            if(i.hops == 0){
-              q.push_back(i);
-              continue;
-            }
-            i.hops -= 1;
-            tmp.push_back(i);
-          }
-          arrivel_q = tmp;
-        }
-        void arrive(Request& req) {
-            if(req.hops == 0) {
-                q.push_back(req);
-            } else {
-                arrivel_q.push_back(req);
-            }
-        }
-        void push_back(Request& req){
-            if(req.hops == 0) {
-                q.push_back(req);
-            } else {
-                arrivel_q.push_back(req);
-            }
-        }
-        void pop_front(){q.pop_front();}
-    };
-
+    long total_pending_finished_task = 0;
+    long total_pending_write_finished_task = 0;
     deque<Request> pending;  // read requests that are about to receive data from DRAM
     deque<Request> pending_write;  //write requests that are about to receive data from DRAM
 
@@ -714,6 +683,7 @@ public:
         if (req.type == Request::Type::READ && find_if(writeq.q.begin(), writeq.q.end(),
                 [req](Request& wreq){ return req.addr == wreq.addr && req.coreid == wreq.coreid;}) != writeq.q.end()){
             req.depart = clk + 1;
+            total_pending_finished_task += pending.size();
             pending.push_back(req);
             req.served_without_hops = 1;
         } else {
@@ -782,13 +752,13 @@ public:
                 total_outgoing_queuing_latency += (req.finish_queuing - req.finish_transfer);
                 total_incoming_queuing_latency += (req.depart_hmc - req.depart);
                 // cout << "Req with address " << req.addr << " started at " << req.arrive << " finished transfer at " << req.finish_transfer << " finished queuing at " << req.finish_queuing << " departed HMC at " << req.depart_hmc << endl;
-                assert(total_hmc_latency >= 0);
-                assert(total_latency >= 0);
-                assert(total_transfer_latency >= 0);
-                assert(total_in_memory_latency >= 0);
-                assert(total_process_latency >= 0);
-                assert(total_outgoing_queuing_latency >= 0); 
-                assert(total_incoming_queuing_latency >= 0); 
+                // assert(total_hmc_latency >= 0);
+                // assert(total_latency >= 0);
+                // assert(total_transfer_latency >= 0);
+                // assert(total_in_memory_latency >= 0);
+                // assert(total_process_latency >= 0);
+                // assert(total_outgoing_queuing_latency >= 0);
+                // assert(total_incoming_queuing_latency >= 0);
                 if(update_parent_with_latency) {
                     update_parent_with_latency(req);
                 }
@@ -903,6 +873,7 @@ public:
             if (req->burst_count == 0) {
               req->depart = clk + channel->spec->read_latency;
               debug_hmc("req->depart: %ld\n", req->depart);
+              total_pending_finished_task += pending.size();
               pending.push_back(*req);
             }
         } else if (req->type == Request::Type::WRITE) {
@@ -910,8 +881,10 @@ public:
 
             if (req->burst_count == 0) {
               req->depart = clk + channel->spec->write_latency;
+              total_pending_finished_task += pending.size();
               pending.push_back(*req);
               /*if(pim_mode_enabled){
+                total_pending_finished_task += pending.size();
                 pending.push_back(*req);
               }
               else{

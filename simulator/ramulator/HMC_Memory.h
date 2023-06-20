@@ -3258,6 +3258,7 @@ public:
       long total_outgoing_queuing_latency = 0;
       long total_bursts = 0;
       long stalled_cycles = 0;
+      long total_pending_queue_pending = 0;
       sub_stats_ofs << "-----Controller Stats-----" << "\n";
       for(int c = 0; c < ctrls.size(); c++) {
         sub_stats_ofs << "Controller" << c << "MaxReadQQSize: " << ctrls[c] -> readq.max_q_size << "\n";
@@ -3276,6 +3277,8 @@ public:
         total_otherq_pending += ctrls[c] -> otherq.total_pending_task;
         sub_stats_ofs << "Controller" << c << "OverflowPending: " << ctrls[c] -> overflow.total_pending_task << "\n";
         total_overflow_pending += ctrls[c] -> overflow.total_pending_task;
+        sub_stats_ofs << "Controller" << c << "PendingQPending: " << ctrls[c] -> total_pending_finished_task << "\n";
+        total_pending_queue_pending += ctrls[c] -> total_pending_finished_task;
         sub_stats_ofs << "Controller" << c << "WaitingReady: " << ctrls[c]->total_cycle_waiting_not_ready_request << "\n";
         total_waiting_ready += ctrls[c]->total_cycle_waiting_not_ready_request;
         sub_stats_ofs << "Controller" << c << "RequestLatency: " << ctrls[c]->total_latency << "\n";
@@ -3312,6 +3315,7 @@ public:
       sub_stats_ofs << "TotalWriteQPending: " << total_writeq_pending << "\n";
       sub_stats_ofs << "TotalOtherQPending: " << total_otherq_pending << "\n";
       sub_stats_ofs << "TotalOverflowPending: " << total_overflow_pending << "\n";
+      sub_stats_ofs << "TotalPendingQPending: " << total_pending_queue_pending << "\n";
       sub_stats_ofs << "-----End Controller Stats-----" << "\n";  
       sub_stats_ofs.close();
     }
