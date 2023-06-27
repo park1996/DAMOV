@@ -1830,13 +1830,13 @@ public:
               }
               if(new_count_threshold > (int)count_table.get_count_upper_limit()) {
                 // cout << "Pending new count threshold is " << new_count_threshold << " and it is higher than the higher limit of " << count_table.get_count_upper_limit() << endl;
-                new_count_threshold = (int)count_table.get_count_upper_limit();
+                new_count_threshold = (int)count_table.get_count_upper_limit()+1;
               }
               if(new_count_threshold > prefetch_count_thresholds[c]) {
                 // cout << "In total we are increasing the threshold by " << (new_count_threshold - prefetch_count_thresholds[c]) << endl;;
                 total_threshold_increases += (new_count_threshold - prefetch_count_thresholds[c]);
                 last_threshold_change[c] = 1;
-                new_count_threshold = count_table.get_count_upper_limit();
+                new_count_threshold = count_table.get_count_upper_limit()+1;
               } else if(new_count_threshold < prefetch_count_thresholds[c] || new_count_threshold == 0) {
                 // cout << "In total we are decreasing the threshold by " << (prefetch_count_thresholds[c] - new_count_threshold) << endl;;
                 total_threshold_decreases += (prefetch_count_thresholds[c] - new_count_threshold);
