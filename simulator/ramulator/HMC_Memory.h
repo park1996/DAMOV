@@ -2929,6 +2929,7 @@ public:
           clk_at_end_of_warmup = clk;
           string sub_stats_to_open = application_name+".ramulator.subscription_stats.end_of_warmup";
           write_sub_stats_file(sub_stats_to_open);
+          write_address_distribution(".end_of_warmup");
         }
 
         // cout << "Raw address " << req._addr << " Address before bit operation is " << bitset<64>(req.addr) << endl;
@@ -3320,41 +3321,12 @@ public:
       sub_stats_ofs.close();
     }
 
-    void finish() {
-      std::cout << "[RAMULATOR] Gathering stats \n";
-
-      dram_capacity = max_address;
-      int *sz = spec->org_entry.count;
-      maximum_internal_bandwidth =
-        spec->speed_entry.rate * 1e6 * spec->channel_width * sz[int(HMC::Level::Vault)] / 8;
-      maximum_link_bandwidth =
-        spec->link_width * 2 * spec->source_links * spec->lane_speed * 1e9 / 8;
-
-      long dram_cycles = num_dram_cycles.value();
-      long total_read_req = num_read_requests.total();
-      for (auto ctrl : ctrls) {
-        ctrl->finish(dram_cycles);
-      }
-      read_bandwidth = read_transaction_bytes.value() * 1e9 / (dram_cycles * clk_ns());
-      write_bandwidth = write_transaction_bytes.value() * 1e9 / (dram_cycles * clk_ns());;
-      read_latency_avg = read_latency_sum.value() / total_read_req;
-      queueing_latency_avg = queueing_latency_sum.value() / total_read_req;
-      request_packet_latency_avg = request_packet_latency_sum.value() / total_read_req;
-      response_packet_latency_avg = response_packet_latency_sum.value() / total_read_req;
-      read_latency_ns_avg = read_latency_avg.value() * clk_ns();
-      queueing_latency_ns_avg = queueing_latency_avg.value() * clk_ns();
-      request_packet_latency_ns_avg = request_packet_latency_avg.value() * clk_ns();
-      response_packet_latency_ns_avg = response_packet_latency_avg.value() * clk_ns();
-      req_queue_length_avg = req_queue_length_sum.value() / dram_cycles;
-      read_req_queue_length_avg = read_req_queue_length_sum.value() / dram_cycles;
-      write_req_queue_length_avg = write_req_queue_length_sum.value() / dram_cycles;
-
-      string to_open = application_name+".ramulator.address_distribution";
-      string to_open_r = application_name+".ramulator.address_distribution_r";
-      string to_open_w = application_name+".ramulator.address_distribution_w";
-      string to_open_o = application_name+".ramulator.address_distribution_o";
+    void write_address_distribution(string postfix) {
+      string to_open = application_name+".ramulator.address_distribution"+postfix;
+      string to_open_r = application_name+".ramulator.address_distribution_r"+postfix;
+      string to_open_w = application_name+".ramulator.address_distribution_w"+postfix;
+      string to_open_o = application_name+".ramulator.address_distribution_o"+postfix;
       cout << "Address distribution stored at: " << to_open << endl;
-      cout << "Number of cores: " << num_cores << endl;
       std::ofstream ofs(to_open.c_str(), std::ofstream::out);
       ofs << "CoreID VaultID #Requests\n";
       for(int i=0; i < address_distribution.size(); i++){
@@ -3387,6 +3359,40 @@ public:
         }
       }
       ofs_o.close();
+    }
+
+    void finish() {
+      std::cout << "[RAMULATOR] Gathering stats \n";
+
+      dram_capacity = max_address;
+      int *sz = spec->org_entry.count;
+      maximum_internal_bandwidth =
+        spec->speed_entry.rate * 1e6 * spec->channel_width * sz[int(HMC::Level::Vault)] / 8;
+      maximum_link_bandwidth =
+        spec->link_width * 2 * spec->source_links * spec->lane_speed * 1e9 / 8;
+
+      long dram_cycles = num_dram_cycles.value();
+      long total_read_req = num_read_requests.total();
+      for (auto ctrl : ctrls) {
+        ctrl->finish(dram_cycles);
+      }
+      read_bandwidth = read_transaction_bytes.value() * 1e9 / (dram_cycles * clk_ns());
+      write_bandwidth = write_transaction_bytes.value() * 1e9 / (dram_cycles * clk_ns());;
+      read_latency_avg = read_latency_sum.value() / total_read_req;
+      queueing_latency_avg = queueing_latency_sum.value() / total_read_req;
+      request_packet_latency_avg = request_packet_latency_sum.value() / total_read_req;
+      response_packet_latency_avg = response_packet_latency_sum.value() / total_read_req;
+      read_latency_ns_avg = read_latency_avg.value() * clk_ns();
+      queueing_latency_ns_avg = queueing_latency_avg.value() * clk_ns();
+      request_packet_latency_ns_avg = request_packet_latency_avg.value() * clk_ns();
+      response_packet_latency_ns_avg = response_packet_latency_avg.value() * clk_ns();
+      req_queue_length_avg = req_queue_length_sum.value() / dram_cycles;
+      read_req_queue_length_avg = read_req_queue_length_sum.value() / dram_cycles;
+      write_req_queue_length_avg = write_req_queue_length_sum.value() / dram_cycles;
+
+      cout << "Number of cores: " << num_cores << endl;
+      write_address_distribution("");
+      
       memory_addresses.close();
       adaptive_thresholds.close();
       adaptive_thresholds_record.close();
