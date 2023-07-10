@@ -107,6 +107,7 @@ protected:
   long warmup_reqs = 0;
   int network_width = 6;
   int network_height = 6;
+  int central_vault = 14;
   int max_hops = 70;
 public:
     long clk = 0;
@@ -162,6 +163,9 @@ public:
       std::cout << "Recording memory trace at " << to_open << "\n";
       memory_addresses.open(to_open.c_str(), std::ofstream::out);
       memory_addresses << "CLK,ADDR,CoreID,Hops,NoPFHops,W|R,Vault,BankGroup,Bank,Row,Column \n";
+    }
+
+    void set_adaptive_threshold_recorder () {
       string thresholds_to_open = application_name + ".adaptive_thresholds.csv";
       adaptive_thresholds.open(thresholds_to_open.c_str(), std::ofstream::out);
       adaptive_thresholds << "Epoch Start Cycle,";
@@ -187,9 +191,6 @@ public:
       feedback_reg_epoch << "\n";
       string set_sampling_result_to_open = application_name+".set_sampling_result.csv";
       set_sampling_result.open(set_sampling_result_to_open.c_str(), std::ofstream::out);
-    }
-
-    void set_adaptive_threshold_recorder () {
       string to_open = application_name + ".adaptive_thresholds_record.csv";
       adaptive_thresholds_record.open(to_open.c_str(), std::ofstream::out);
       adaptive_thresholds_record << "Epoch Start Cycle,";
@@ -273,6 +274,8 @@ public:
           UpdateOnWrite, // Set dirty bit on write
           IncThreshold, // Happens in adapative policy. Broadcast to all vaults to increase threshold
           DecThreshold, // Same as above, but decrease threshold
+          UpdateAdap,
+          UpdateThreshold,
         } type;
         long addr;
         int from_vault;
@@ -281,10 +284,19 @@ public:
         bool dirty = false;
         bool from_buffer = false;
         int count = 0;
+        int64_t feedback = 0;
+        long latencies = 0;
+        int num_requests = 0;
+        unordered_map<int, long> latencies_for_diff_thresholds;
+        unordered_map<int, int> requests_completed_for_diff_thresholds;
+        unordered_map<int, int64_t> feedbacks_for_diff_thresholds;
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, int count):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),count(count){}
         SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, bool dirty, bool from_buffer):addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),dirty(dirty),from_buffer(from_buffer){}
+        SubscriptionTask(long addr, int from_vault, int to_vault, int hops, Type type, int64_t feedback, long latencies, int num_requests, unordered_map<int, long> latencies_for_thresholds, unordered_map<int, int> requests_for_thresholds, unordered_map<int, int64_t> feedbacks_for_thresholds)
+          :addr(addr),from_vault(from_vault),to_vault(to_vault),hops(hops),type(type),feedback(feedback),
+          latencies(latencies),num_requests(num_requests), latencies_for_diff_thresholds(latencies_for_thresholds), requests_completed_for_diff_thresholds(requests_for_thresholds), feedbacks_for_diff_thresholds(feedbacks_for_thresholds){}
         SubscriptionTask(){}
       };
       class LRUUnit;
@@ -830,14 +842,18 @@ public:
       // Actually dicatates when prefetch happens.
       uint64_t prefetch_hops_threshold = 5;
       uint64_t prefetch_count_threshold = 1;
-      vector<int> available_thresholds = {0, 63};
+      vector<int> available_thresholds = {0, 64};
       unordered_map<int, int> set_to_thresholds;
       int sample_set_size = 64;
       vector<unordered_map<int, long>> latencies_for_diff_thresholds;
       vector<unordered_map<int, int>> requests_completed_for_diff_thresholds;
       vector<unordered_map<int, long>> max_latencies_for_diff_thresholds;
+      unordered_map<int, long> global_latencies_for_diff_thresholds;
+      unordered_map<int, int> global_requests_completed_for_diff_thresholds;
+      unordered_map<int, int64_t> global_feedbacks_for_diff_thresholds;
       uint64_t threshold_change_epoch = 100000;
       vector<uint64_t> prefetch_count_thresholds;
+      int64_t next_prefetch_count_threshold = -1;
       uint64_t prefetch_maximum_count_threshold = 0;
       // Adaptively change the above numbers as the program executes
       bool adaptive_threshold_changes = false;
@@ -846,6 +862,9 @@ public:
       bool set_sampling_on = false;
       bool use_global_adaptive = false;
       bool use_maximum_latency = false;
+      double update_factor = 0.9;
+      long update_at = lround(threshold_change_epoch*update_factor);
+      long process_latency = 1000;
       int invert_latency_variance_threshold = 40;
       vector<int64_t> feedbacks;
       int64_t global_feedback;
@@ -1059,6 +1078,15 @@ public:
           cout << "Using Average Latency" << endl;
         }
       }
+      void set_update_factor(double factor) {
+        update_factor = factor;
+        update_at = lround(threshold_change_epoch*update_factor);
+        cout << "Update factor: " << update_factor << ". we will update at " << update_at << " cycle after the last epoch." << endl;
+      }
+      void set_process_latency(long latency) {
+        process_latency = latency;
+        cout << "Process latency: " << process_latency << endl;
+      }
       void set_positive_feedback_threshold(long threshold) {
         // Ignore threshold if the flag is turned off
         if(adaptive_threshold_changes) {
@@ -1147,9 +1175,8 @@ public:
           subscription_tables[c].propogate_count_threshold(prefetch_count_threshold);
         }
         feedback_threshold = (long)(1<<(feedback_bits-1)) / ((long)count_table.get_count_upper_limit()+1);
-        // int sampling_set = subscription_table_sets / 8;
-        // int sampling_set = subscription_table_sets - 1;
-        int sampling_set = 0;
+        int sampling_set = subscription_table_sets / 8;
+        // int sampling_set = 0;
         for(auto threshold:available_thresholds) {
           for(int i = 0; i < sample_set_size; i++) {
             set_to_thresholds[sampling_set] = threshold;
@@ -1655,7 +1682,16 @@ public:
             print_debug_info("Recv DecThreshold from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
             process_decrease_threshold(task);
             break;
+          case SubscriptionTask::Type::UpdateAdap:
+            print_debug_info("Recv UpdateAdap from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
+            process_update_adaptive(task);
+            break;
+          case SubscriptionTask::Type::UpdateThreshold:
+            print_debug_info("Recv UpdateThreshold from "+to_string(task.from_vault)+" to "+to_string(task.to_vault)+" addr "+to_string(task.addr));
+            process_update_threshold(task);
+            break;
           default:
+            cout << "Unknown subscription task type " << task.type << endl;
             assert(false);
         }
       }
@@ -1700,6 +1736,14 @@ public:
             pending_send[c]--;
           }
         }
+        
+        // For global adaptive only - every vault send the stats to the central vault for processing
+        if(mem_ptr -> clk % threshold_change_epoch == update_at && adaptive_threshold_changes && use_global_adaptive) {
+          for(int c = 0; c < controllers; c++) {
+            submit_update_adaptive(c);
+          }
+        }
+
         // Finally, we try to process threshold changes
         if(mem_ptr -> clk % threshold_change_epoch == 0 && mem_ptr -> clk > 0) {
           mem_ptr -> adaptive_thresholds << mem_ptr -> clk << ",";
@@ -1728,51 +1772,56 @@ public:
             int new_count_threshold = -1;
             int exammined_thresholds = 0;
             if(set_sampling_on) {
-              // // Use feedback register to do set_sampling
-              // int64_t max_feedback = LONG_MIN;
-              // // Iterate through all available thresholds
-              // for(auto threshold:available_thresholds) {
-              //   // Initialize current feedback to 0
-              //   int64_t current_feedback = 0;
-              //   // If we have feedback, we use that
-              //   if(feedbacks_for_diff_thresholds[c].count(threshold)) {
-              //     current_feedback = feedbacks_for_diff_thresholds[c][threshold];
-              //   }
-              //   // If the feedback is higher than the maximum, we use that feedback and threshold
-              //   if(current_feedback >= max_feedback) {
-              //     max_feedback = current_feedback;
-              //     new_count_threshold = threshold;
-              //   }
-
-              //   // cout << "At cycle " << mem_ptr -> clk << " Core " << c << " threshold " << threshold << " has feedback " << current_feedback << endl;
-              //   mem_ptr -> set_sampling_result << current_feedback << ",";
-              // }
-
-              // Use latency for set sampling
-              double min_avg_latency = (double)LONG_MAX;
-              // Iterative through all thresholds
-              for(auto threshold:available_thresholds) {
-                double current_threshold_latency = (double)LONG_MAX;
-                if(requests_completed_for_diff_thresholds[c].count(threshold)) {
-                  exammined_thresholds++;
-                  if(!use_maximum_latency) {
-                    current_threshold_latency = ((double)(latencies_for_diff_thresholds[c][threshold])) / ((double)(requests_completed_for_diff_thresholds[c][threshold]));
-                  } else {
-                    current_threshold_latency = (double)(max_latencies_for_diff_thresholds[c][threshold]);
+              if(invert_latency_variance_threshold <= 0) {
+                // Use feedback register to do set_sampling
+                int64_t max_feedback = LONG_MIN;
+                // Iterate through all available thresholds
+                for(auto threshold:available_thresholds) {
+                  // Initialize current feedback to 0
+                  int64_t current_feedback = 0;
+                  // If we have feedback, we use that
+                  unordered_map<int, int64_t>& feedbacks_map = use_global_adaptive ? global_feedbacks_for_diff_thresholds : feedbacks_for_diff_thresholds[c];
+                  if(feedbacks_map.count(threshold)) {
+                    current_feedback = feedbacks_map[threshold];
                   }
+                  // If the feedback is higher than the maximum, we use that feedback and threshold
+                  if(current_feedback >= max_feedback) {
+                    max_feedback = current_feedback;
+                    new_count_threshold = threshold;
+                  }
+
+                  // cout << "At cycle " << mem_ptr -> clk << " Core " << c << " threshold " << threshold << " has feedback " << current_feedback << endl;
+                  mem_ptr -> set_sampling_result << current_feedback << ",";
                 }
-                if(current_threshold_latency < min_avg_latency) {
-                  min_avg_latency = current_threshold_latency;
-                  new_count_threshold = threshold;
+              } else {
+                // Use latency for set sampling
+                double min_avg_latency = (double)LONG_MAX;
+                // Iterative through all thresholds
+                for(auto threshold:available_thresholds) {
+                  double current_threshold_latency = (double)LONG_MAX;
+                  unordered_map<int, int>& requests_map = use_global_adaptive ? global_requests_completed_for_diff_thresholds : requests_completed_for_diff_thresholds[c];
+                  unordered_map<int, long> latencies_map = use_global_adaptive ? global_latencies_for_diff_thresholds : latencies_for_diff_thresholds[c];
+                  if(requests_map.count(threshold)) {
+                    exammined_thresholds++;
+                    if(!use_maximum_latency) {
+                      current_threshold_latency = ((double)(latencies_map[threshold])) / ((double)(requests_map[threshold]));
+                    } else {
+                      current_threshold_latency = (double)(max_latencies_for_diff_thresholds[c][threshold]);
+                    }
+                  }
+                  if(current_threshold_latency < min_avg_latency) {
+                    min_avg_latency = current_threshold_latency;
+                    new_count_threshold = threshold;
+                  }
+                  mem_ptr -> set_sampling_result << current_threshold_latency << ",";
                 }
-                mem_ptr -> set_sampling_result << current_threshold_latency << ",";
-              }
-              if(exammined_thresholds <= 1) {
-                // cout << "We exammined less than 2 thresholds for core " << c << ". Keeping the old threshold" << endl;
-                new_count_threshold = -1;
-              }
-              if(new_count_threshold != -1) {
-                // cout << "Threshold " << new_count_threshold << " for core " << c << " has latency " << min_avg_latency << " which is lower so we are using it" << endl;
+                if(exammined_thresholds <= 1) {
+                  cout << "We exammined less than 2 thresholds for core " << c << ". Keeping the old threshold" << endl;
+                  new_count_threshold = -1;
+                }
+                if(new_count_threshold != -1) {
+                  // cout << "Threshold " << new_count_threshold << " for core " << c << " has latency " << min_avg_latency << " which is lower so we are using it" << endl;
+                }
               }
             }
 
@@ -1809,16 +1858,17 @@ public:
             mem_ptr -> adaptive_thresholds_record << magnitude << ",";
             mem_ptr -> adaptive_thresholds_record << last_threshold_change[c] << ",";
             
-
-            previous_latencies[c] = current_latency;
-            latencies_for_current_epoch[c] = 0;
-            requests_completed_for_current_epoch[c] = 0;
-            maximum_latency_for_current_epoch[c] = 0;
-            feedbacks[c] = 0;
-            requests_completed_for_diff_thresholds[c] = unordered_map<int, int>();
-            latencies_for_diff_thresholds[c] = unordered_map<int, long>();
-            max_latencies_for_diff_thresholds[c] = unordered_map<int, long>();
-            feedbacks_for_diff_thresholds[c] = unordered_map<int, int64_t>();
+            if(!use_global_adaptive) {
+              previous_latencies[c] = current_latency;
+              latencies_for_current_epoch[c] = 0;
+              requests_completed_for_current_epoch[c] = 0;
+              maximum_latency_for_current_epoch[c] = 0;
+              feedbacks[c] = 0;
+              requests_completed_for_diff_thresholds[c] = unordered_map<int, int>();
+              latencies_for_diff_thresholds[c] = unordered_map<int, long>();
+              max_latencies_for_diff_thresholds[c] = unordered_map<int, long>();
+              feedbacks_for_diff_thresholds[c] = unordered_map<int, int64_t>();
+            }
 
             if(adaptive_threshold_changes) {
               if(new_count_threshold == -1) {
@@ -1848,18 +1898,20 @@ public:
               if(new_count_threshold > prefetch_maximum_count_threshold) {
                 prefetch_maximum_count_threshold = new_count_threshold;
               }
-              
-
-              for(auto addr:subscription_tables[c].unused_subscriptions) {
-                if(subscription_tables[c][addr.first] == c && (addr.second <= 0 || new_count_threshold >= count_table.get_count_upper_limit())) {
-                  unsubscribe_address(c, addr.first);
-                }
-              }
 
               mem_ptr -> adaptive_thresholds << new_count_threshold << ",";
               mem_ptr -> adaptive_thresholds_record << new_count_threshold << ",";
-              prefetch_count_thresholds[c] = new_count_threshold;
-              subscription_tables[c].propogate_count_threshold(new_count_threshold);
+              if(!use_global_adaptive) {
+                prefetch_count_thresholds[c] = (uint64_t)new_count_threshold;
+                subscription_tables[c].propogate_count_threshold(new_count_threshold);
+                for(auto addr:subscription_tables[c].unused_subscriptions) {
+                  if(subscription_tables[c][addr.first] == c && (addr.second <= 0 || new_count_threshold >= count_table.get_count_upper_limit())) {
+                    unsubscribe_address(c, addr.first);
+                  }
+                }
+              } else if(c == mem_ptr -> central_vault) {
+                next_prefetch_count_threshold = (int64_t)new_count_threshold;
+              }
               // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
             }
           }
@@ -1872,6 +1924,13 @@ public:
           mem_ptr -> feedback_reg_epoch <<  "\n";
           mem_ptr -> adaptive_thresholds_record << "\n";
           mem_ptr -> set_sampling_result << "\n";
+        }
+
+        if(adaptive_threshold_changes && mem_ptr -> clk % threshold_change_epoch == process_latency && next_prefetch_count_threshold >= 0 && use_global_adaptive) {
+          for(int c = 0; c < controllers; c++) {
+            submit_update_threshold(c, (uint64_t)next_prefetch_count_threshold);
+          }
+          next_prefetch_count_threshold = -1;
         }
       }
       void pre_process_addr(long& addr) {
@@ -2046,6 +2105,67 @@ public:
         //   submit_increase_threshold(vault, cycles);
         // }
       }
+      void submit_update_adaptive(int vault) {
+        int hops = mem_ptr -> calculate_hops_travelled(vault, mem_ptr -> central_vault);
+        pending.push_back(SubscriptionTask(0, vault, mem_ptr -> central_vault, hops+pending_send[vault], SubscriptionTask::Type::UpdateAdap,
+          feedbacks[vault], latencies_for_current_epoch[vault], requests_completed_for_current_epoch[vault], latencies_for_diff_thresholds[vault],
+          requests_completed_for_diff_thresholds[vault], feedbacks_for_diff_thresholds[vault]));
+        // cout << "submitting update adaptive for vault " << vault << " it has latency map of size " << latencies_for_diff_thresholds[vault].size() << endl;
+        pending_send[vault]+=1;
+        feedbacks[vault] = 0;
+        previous_latencies[vault] = latencies_for_current_epoch[vault];
+        latencies_for_current_epoch[vault] = 0;
+        requests_completed_for_current_epoch[vault] = 0;
+        latencies_for_diff_thresholds[vault] = unordered_map<int, long>();
+        requests_completed_for_diff_thresholds[vault] = unordered_map<int, int>();
+        feedbacks_for_diff_thresholds[vault] = unordered_map<int, int64_t>();
+
+      }
+      void process_update_adaptive(const SubscriptionTask& task) {
+        assert(task.type == SubscriptionTask::Type::UpdateAdap);
+        // cout << "Process update adaptive..." << endl;
+        global_latencies+=task.latencies;
+        global_requests+=task.num_requests;
+        global_feedback += task.feedback;
+        if(global_feedback > feedback_maximum) {
+          global_feedback = feedback_maximum;
+        } else if(global_feedback < feedback_minimum) {
+          global_feedback = feedback_minimum;
+        }
+        for(auto i : task.latencies_for_diff_thresholds) {
+          // cout << "vault " << task.from_vault << " and its threshold " << i.first << " has latency " << i.second << endl;
+          if(global_latencies_for_diff_thresholds.count(i.first) <= 0) {
+            global_latencies_for_diff_thresholds[i.first] = 0;
+          }
+          global_latencies_for_diff_thresholds[i.first] += i.second;
+        }
+        for(auto i : task.requests_completed_for_diff_thresholds) {
+          if(global_requests_completed_for_diff_thresholds.count(i.first) <= 0) {
+            global_requests_completed_for_diff_thresholds[i.first] = 0;
+          }
+          global_requests_completed_for_diff_thresholds[i.first] += i.second;
+        }
+      }
+      void submit_update_threshold(int vault, uint64_t threshold) {
+        int hops = mem_ptr -> calculate_hops_travelled(vault, mem_ptr -> central_vault);
+        SubscriptionTask task = SubscriptionTask((long)threshold, mem_ptr -> central_vault, vault, hops+pending_send[mem_ptr -> central_vault], SubscriptionTask::Type::UpdateThreshold);
+        if(vault == mem_ptr -> central_vault) {
+          process_update_threshold(task);
+        } else {
+          pending.push_back(task);
+        }
+      }
+      void process_update_threshold(const SubscriptionTask& task) {
+        assert(task.type == SubscriptionTask::Type::UpdateThreshold);
+        int new_count_threshold = (int)task.addr;
+        prefetch_count_thresholds[task.to_vault] = (uint64_t)new_count_threshold;
+        subscription_tables[task.to_vault].propogate_count_threshold(new_count_threshold);
+        for(auto addr:subscription_tables[task.to_vault].unused_subscriptions) {
+          if(subscription_tables[task.to_vault][addr.first] == task.to_vault && (addr.second <= 0 || (uint64_t)new_count_threshold >= count_table.get_count_upper_limit())) {
+            unsubscribe_address(task.to_vault, addr.first);
+          }
+        }
+      }
       void submit_increase_threshold(int vault, int cycles) {
         // cout << "Broadcasting increase request" << endl;
         pending.push_back(SubscriptionTask(0, vault, vault, cycles, SubscriptionTask::Type::IncThreshold));
@@ -2080,9 +2200,9 @@ public:
         long latency = req.depart_hmc - req.arrive_hmc;
         int from_vault = req.coreid;
         latencies_for_current_epoch[from_vault] += latency;
-        global_latencies += latency;
+        // global_latencies += latency;
         requests_completed_for_current_epoch[from_vault]++;
-        global_requests++;
+        // global_requests++;
         if(latency > maximum_latency_for_current_epoch[from_vault]) {
           maximum_latency_for_current_epoch[from_vault] = latency;
         }
@@ -2196,6 +2316,7 @@ public:
           network_width = ceil(sqrt(ctrls.size()));
           network_height = ceil(sqrt(ctrls.size()));
           max_hops = (network_width+network_height)*(DATA_LENGTH+2);
+          central_vault = (network_width - 1) / 2 + ((network_height - 1) / 2 * network_width);
           cout << "We are simulating the network latency of a " << network_width << "x" << network_height << " network" << endl;
         }
 
@@ -2349,11 +2470,17 @@ public:
           if (configs.contains("set_sampling")) {
             prefetcher_set.set_set_sampling(configs["set_sampling"] == "true");
           }
-          if (configs.contains("use_global_adaptive")) {
-            prefetcher_set.set_use_global_adaptive(configs["use_global_adaptive"] == "true");
-          }
           if (configs.contains("use_maximum_latency")) {
             prefetcher_set.set_use_maximum_latency(configs["use_maximum_latency"] == "true");
+          }
+          if (configs.contains("use_global_adaptive")) {
+            prefetcher_set.set_use_global_adaptive(configs["use_global_adaptive"] == "true");
+            if (configs.contains("update_factor")) {
+              prefetcher_set.set_update_factor(stod(configs["update_factor"]));
+            }
+            if (configs.contains("process_latency")) {
+              prefetcher_set.set_process_latency(stol(configs["process_latency"]));
+            }
           }
         }
 
@@ -3418,7 +3545,7 @@ public:
       string cycle_stats_to_open = application_name+".ramulator.cycle_stats";
       ofstream cycle_stats_ofs(cycle_stats_to_open.c_str(), ofstream::out);
       cycle_stats_ofs << "RamulatorCycleAtFinish: " << clk << "\n";
-      cycle_stats_ofs << "WarmupCycles: " << clk_at_end_of_warmup << "\n";
+      cycle_stats_ofs << "WarmupCycles: " << (clk_at_end_of_warmup <= 0 ? clk : clk_at_end_of_warmup)  << "\n";
       cycle_stats_ofs.close();
       string sub_stats_to_open = application_name+".ramulator.subscription_stats";
       write_sub_stats_file(sub_stats_to_open);
