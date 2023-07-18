@@ -7,7 +7,7 @@ import numpy
 
 hops_thresholds = get_hops_thresholds()
 # count_thresholds = get_count_thresholds()
-count_thresholds = [0, 1, 63]
+count_thresholds = [0]
 hops_thresholds_str = [""]
 count_thresholds_str = [""]
 debug_tag = "debugoff"
@@ -117,7 +117,8 @@ benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO
 processor_type_prefix = "pim_prefetch_netoh_"
 baseline_processor_type = "pim_ooo_netoh"
 prefetcher_types = ["allocate"]
-core_numbers = get_core_numbers()
+# core_numbers = get_core_numbers()
+core_numbers = [32]
 # core_number = "32"
 
 output_filename = "stats_all_pim_pf_with_diff_thresholds_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".csv"
@@ -142,6 +143,7 @@ with open(output_filename, mode='w') as csv_file:
                 baseline_hmc_latency = -1
                 baseline_readq_pending = -1
                 baseline_writeq_pending = -1
+                baseline_pendingq_pending = -1
                 baseline_sub_stat_file_location = os.path.join(stats_folders, baseline_processor_type, str(core_number), full_benchmark_name+".ramulator.subscription_stats")
                 if os.path.isfile(baseline_sub_stat_file_location):
                     baseline_access_hops = extract_subscription_stats(baseline_sub_stat_file_location, "AccessPktHopsTravelled")
@@ -149,7 +151,8 @@ with open(output_filename, mode='w') as csv_file:
                     baseline_req_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalRequestLatency")
                     baseline_hmc_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalHMCLatency")
                     baseline_readq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalReadQPending")
-                    baseline_writeq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalWriteQPending")   
+                    baseline_writeq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalWriteQPending")
+                    baseline_pendingq_pending = extract_subscription_stats(baseline_sub_stat_file_location, "TotalPendingQPending")
                 baseline_req_to_vault_mean = -1
                 baseline_req_to_vault_std = -1
                 baseline_req_to_vault_cov = -1
@@ -202,7 +205,8 @@ with open(output_filename, mode='w') as csv_file:
                         avg_hmc_latency_line = ["Average HMC Latency", "N/A" if baseline_hmc_latency == -1 or baseline_mem_access == -1 or baseline_mem_access == 0 else str(float(baseline_hmc_latency)/float(baseline_mem_access))]
                         normalized_hmc_latency_line = ["Normalized HMC Latency", "N/A" if baseline_hmc_latency == -1 else str(1)]
                         readq_pending_line = ["Total Read Queue Pending", "N/A" if baseline_readq_pending == -1 else str(baseline_readq_pending)]
-                        writeq_pending_line = ["Total Write Queue Pending", "N/A" if baseline_writeq_pending == -1 else str(baseline_writeq_pending)]   
+                        writeq_pending_line = ["Total Write Queue Pending", "N/A" if baseline_writeq_pending == -1 else str(baseline_writeq_pending)]
+                        pendingq_pending_line = ["Total Pending Queue Pending", "N/A" if baseline_pendingq_pending == -1 else str(baseline_pendingq_pending)]  
                         for prefetcher_policy in prefetcher_policies:
                             processor_type = processor_type_prefix+prefetcher_type
                             stat_file_location = os.path.join(stats_folders, processor_type, prefetcher_policy+"_"+debug_tag, str(core_number), full_benchmark_name+".zsim.out")
@@ -249,6 +253,7 @@ with open(output_filename, mode='w') as csv_file:
                                 normalized_hmc_latency_line.append("N/A")
                                 readq_pending_line.append("N/A")
                                 writeq_pending_line.append("N/A")
+                                pendingq_pending_line.append("N/A")
                             else:
                                 access_hops = extract_subscription_stats(sub_stat_file_location, "AccessPktHopsTravelled")
                                 sub_hops = extract_subscription_stats(sub_stat_file_location, "SubscriptionPktHopsTravelled")
@@ -267,7 +272,8 @@ with open(output_filename, mode='w') as csv_file:
                                 req_latency = extract_subscription_stats(sub_stat_file_location, "TotalRequestLatency")
                                 hmc_latency = extract_subscription_stats(sub_stat_file_location, "TotalHMCLatency")
                                 readq_pending = extract_subscription_stats(sub_stat_file_location, "TotalReadQPending")
-                                writeq_pending = extract_subscription_stats(sub_stat_file_location, "TotalWriteQPending")  
+                                writeq_pending = extract_subscription_stats(sub_stat_file_location, "TotalWriteQPending")
+                                pendingq_pending = extract_subscription_stats(sub_stat_file_location, "TotalPendingQPending")
                                 access_hops_line.append("N/A" if access_hops == -1 else str(access_hops))
                                 normalized_access_hops_line.append("N/A" if access_hops == -1 or access_hops == 0 or baseline_access_hops == -1 else str(float(baseline_access_hops)/float(access_hops)))
                                 sub_hops_line.append("N/A" if sub_hops == -1 else str(sub_hops))
@@ -296,6 +302,7 @@ with open(output_filename, mode='w') as csv_file:
                                 normalized_hmc_latency_line.append("N/A" if hmc_latency == -1 or baseline_hmc_latency == -1 or hmc_latency == 0 else str(float(baseline_hmc_latency)/float(hmc_latency)))
                                 readq_pending_line.append("N/A" if readq_pending == -1 else str(readq_pending))
                                 writeq_pending_line.append("N/A" if writeq_pending == -1 else str(writeq_pending))
+                                pendingq_pending_line.append("N/A" if pendingq_pending == -1 else str(pendingq_pending))
                             if not os.path.isfile(addr_dist_file_location):
                                 requests_to_vault_mean_line.append("N/A")
                                 requests_to_vault_std_line.append("N/A")
@@ -343,6 +350,7 @@ with open(output_filename, mode='w') as csv_file:
                         csv_writer.writerow(normalized_hmc_latency_line)
                         csv_writer.writerow(readq_pending_line)
                         csv_writer.writerow(writeq_pending_line)
+                        csv_writer.writerow(pendingq_pending_line)
                     csv_writer.writerow('')
 
 

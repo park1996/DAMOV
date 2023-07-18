@@ -27,7 +27,7 @@ debug_tag = "debugoff"
 
 start_time = datetime.now()
 print "We are starting experiment on "+start_time.strftime("%Y-%m-%d %H:%M:%S")
-maximum_thread = 50
+maximum_thread = 20
 threads = []
 output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -59,7 +59,8 @@ def clean_outputs():
         os.remove(f)
     for f in glob.glob(os.path.join(os.getcwd(), "HPCG*.txt")):
         os.remove(f)
-    subprocess.call(["rm", os.path.join(os.getcwd(), "out.fluid")])
+    if os.path.exists(os.path.join(os.getcwd(), "out.fluid")):
+        subprocess.call(["rm", os.path.join(os.getcwd(), "out.fluid")])
 
 def run_benchmark(processor_type, benchmark_suite, core_number, function, postfix, is_rerun):
     thread_start_time = datetime.now()
@@ -78,6 +79,7 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
             if not is_rerun:
                 failed_benchmarks.append([processor_type, benchmark_suite, core_number, function])
 
+serialized_benchmark_suites_and_benchmarks_functions = {}
 # Following are all the benchmark workloads that is currently compiling and available
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["resnet152_gemm_nn", "yolo_gemm_nn"],
@@ -91,33 +93,33 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # Following are all the benchmarks that currently runs
-# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
-#     "darknet" : ["yolo_gemm_nn"],
-#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
-#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
-#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
-#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
-#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
-#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
-# The following benchmarks requires to be run serialized (or run multiple times?)
-serialized_benchmark_suites_and_benchmarks_functions = {
-    "hpcg" : ["HPCG_ComputeSYMGS"],
-    "hashjoin" : ["PRH_histogramjoin"], 
-    "splash-2":["FFT_Reverse","FFT_Transpose"],
-    "ligra" : ["BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded"],}
-# The following benchmarks are the set complement of the above benchmark
 benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
     "darknet" : ["yolo_gemm_nn"],
-    "hashjoin" : ["NPO_probehashtable"],
-    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
-    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+# The following benchmarks requires to be run serialized (or run multiple times?)
+# serialized_benchmark_suites_and_benchmarks_functions = {
+#     "hpcg" : ["HPCG_ComputeSYMGS"],
+#     "hashjoin" : ["PRH_histogramjoin"], 
+#     "splash-2":["FFT_Reverse","FFT_Transpose"],
+#     "ligra" : ["BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded"],}
+# The following benchmarks are the set complement of the above benchmark
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
+#     "darknet" : ["yolo_gemm_nn"],
+#     "hashjoin" : ["NPO_probehashtable"],
+#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV"],
+#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
+#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following are benchmarks that impacted by our model
 # benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
 #     "darknet" : ["yolo_gemm_nn"],
@@ -157,17 +159,17 @@ if "chai" in benchmark_suites_and_benchmarks_functions:
         subprocess.call(["cp", "-r", input_dir, os.path.join(os.getcwd(), "input")])
 
 
-processor_types = ["pim_ooo_netoh"] # Include one for baseline
-# processor_types = []
-core_numbers = get_core_numbers()
-# core_numbers = [256]
+# processor_types = ["pim_ooo_netoh"] # Include one for baseline
+processor_types = []
+# core_numbers = get_core_numbers()
+core_numbers = [32]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["allocate"]
 for prefetcher_type in prefetcher_types:
     processor_types.append(processor_type_prefix+prefetcher_type+"/adaptive_"+debug_tag)
-    for hops_threshold in hops_thresholds:
-        for count_threshold in count_thresholds:
-            processor_types.append(processor_type_prefix+prefetcher_type+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag)
+    # for hops_threshold in hops_thresholds:
+    #     for count_threshold in count_thresholds:
+    #         processor_types.append(processor_type_prefix+prefetcher_type+"/"+str(hops_threshold)+"h"+str(count_threshold)+"c_"+debug_tag)
 
 total_experiment_count = 0
 for suite in benchmark_suites_and_benchmarks_functions.keys():

@@ -11,7 +11,8 @@ import numpy
 
 hops_thresholds = get_hops_thresholds()
 # count_thresholds = get_count_thresholds()
-count_thresholds = [0, 1, 63]
+# count_thresholds = [0, 1, 63]
+count_thresholds = [0]
 hops_thresholds_str = [""]
 count_thresholds_str = [""]
 debug_tag = "debugoff"
@@ -197,7 +198,7 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
             for prefetcher_type in prefetcher_types:
                 for hops_threshold in hops_thresholds:
                     prefetcher_policies = []
-                    # prefetcher_policies.append("adaptive")
+                    prefetcher_policies.append("adaptive")
                     config_tag = "baseline "+str(core_number)+" core"
                     x_configs.append(config_tag)
                     for count_threshold in count_thresholds:

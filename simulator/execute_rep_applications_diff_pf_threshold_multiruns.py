@@ -20,14 +20,14 @@ def mkdir_p(directory):
 
 hops_thresholds = get_hops_thresholds()
 # count_thresholds = get_count_thresholds()
-count_thresholds = [0, 1, 63]
+count_thresholds = [0]
 max_memory_gb = 200
 print "Starting execution with debug traces off"
 debug_tag = "debugoff"
 
 start_time = datetime.now()
 print "We are starting experiment on "+start_time.strftime("%Y-%m-%d %H:%M:%S")
-maximum_thread = 20
+maximum_thread = 25
 threads = []
 output_dir_name = "execution_statuses_"+start_time.strftime("%Y-%m-%d_%H-%M-%S")
 output_dir = os.path.join(os.getcwd(), output_dir_name)
@@ -93,16 +93,16 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # Following are all the benchmarks that currently runs
-# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTO_HSTO", "OOPPAD_OOPPAD"],
-#     "darknet" : ["yolo_gemm_nn"],
-#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
-#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
-#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
-#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
-#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
-#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "OOPPAD_OOPPAD"],
+    "darknet" : ["yolo_gemm_nn"],
+    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+    "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+    "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or run multiple times?)
 # serialized_benchmark_suites_and_benchmarks_functions = {
 #     "hpcg" : ["HPCG_ComputeSYMGS"],
@@ -131,11 +131,11 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_laplaccalc", "Radix_slave_sort"], 
 #     "stream" : ["Triad_Triad"]}
 # Following are reserved for test runs of selected benchmarks
-benchmark_suites_and_benchmarks_functions = {
-    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
-    "phoenix" : ["Linearregression_main"],
-    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_laplaccalc", "Radix_slave_sort"],
-}
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
+#     "darknet" : ["yolo_gemm_nn"],
+#     "phoenix" : ["Linearregression_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d"], 
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Radix_slave_sort"],}
 
 clean_darknet_chai_inputs()
 
@@ -163,11 +163,12 @@ if "chai" in benchmark_suites_and_benchmarks_functions:
         input_dir = os.path.abspath(os.path.join(os.getcwd(), "../workloads/chai-cpu/BS/input/"))
         subprocess.call(["cp", "-r", input_dir, os.path.join(os.getcwd(), "input")])
 
-
-processor_types = ["pim_ooo_netoh"] # Include one for baseline
-# processor_types = []
-core_numbers = get_core_numbers()
-# core_numbers = [256]
+processor_types = []
+processor_types += ["pim_ooo_netoh"] # Include one for baseline
+# processor_types += ["pim_ooo"] # Include one to estimate overhead cycles
+# core_numbers = get_core_numbers()
+core_numbers = [32]
+# core_numbers = [4, 64, 128]
 processor_type_prefix = "pim_prefetch_netoh_"
 prefetcher_types = ["allocate"]
 for prefetcher_type in prefetcher_types:
@@ -236,15 +237,100 @@ for current_iteration in range(iterations):
         for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
             for processor_type in processor_types:
                 for core_number in core_numbers:
-                    zsim_out_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".zsim.out")
-                    new_zsim_out_path = zsim_out_path+"."+str(current_iteration)
-                    subscription_stats_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.subscription_stats")
-                    new_subscription_stats_path = subscription_stats_path+"."+str(current_iteration)
+                    adaptive_threshold_record_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".adaptive_thresholds_record.csv")
+                    new_adaptive_threshold_record_path = adaptive_threshold_record_path+"."+str(current_iteration)
+                    if os.path.isfile(adaptive_threshold_record_path):
+                        os.rename(adaptive_threshold_record_path, new_adaptive_threshold_record_path)
+
+                    dram_requests_phase_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".dramRequestsPerPhase")
+                    new_dram_requests_phase_path = dram_requests_phase_path+"."+str(current_iteration)
+                    if os.path.isfile(dram_requests_phase_path):
+                        os.rename(dram_requests_phase_path, new_dram_requests_phase_path)
+
+                    hops_distribution_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".hops_distribution.csv")
+                    new_hops_distribution_path = hops_distribution_path+"."+str(current_iteration)
+                    if os.path.isfile(hops_distribution_path):
+                        os.rename(hops_distribution_path, new_hops_distribution_path)
+
+                    network_cycle_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".network_cycle.csv")
+                    new_network_cycle_path = network_cycle_path+"."+str(current_iteration)
+                    if os.path.isfile(network_cycle_path):
+                        os.rename(network_cycle_path, new_network_cycle_path)
+
+                    config_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".out.cfg")
+                    new_config_path = config_path+"."+str(current_iteration)
+                    if os.path.isfile(config_path):
+                        os.rename(config_path, new_config_path)
+
+                    access_count_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_access_count.csv")
+                    new_access_count_path = access_count_path+"."+str(current_iteration)
+                    if os.path.isfile(access_count_path):
+                        os.rename(access_count_path, new_access_count_path)
+
+                    address_dist_o_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_o")
+                    new_address_dist_o_path = address_dist_o_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_o_path):
+                        os.rename(address_dist_o_path, new_address_dist_o_path)
+
+                    address_dist_o_eow_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_o.end_of_warmup")
+                    new_address_dist_o_eow_path = address_dist_o_eow_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_o_eow_path):
+                        os.rename(address_dist_o_eow_path, new_address_dist_o_eow_path)
+
+                    address_dist_r_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_r")
+                    new_address_dist_r_path = address_dist_r_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_r_path):
+                        os.rename(address_dist_r_path, new_address_dist_r_path)
+                    
+                    address_dist_r_eow_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_r.end_of_warmup")
+                    new_address_dist_r_eow_path = address_dist_r_eow_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_r_eow_path):
+                        os.rename(address_dist_r_eow_path, new_address_dist_r_eow_path)
+
+                    address_dist_w_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_w")
+                    new_address_dist_w_path = address_dist_w_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_w_path):
+                        os.rename(address_dist_w_path, new_address_dist_w_path)
+                    
+                    address_dist_w_eow_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution_w.end_of_warmup")
+                    new_address_dist_w_eow_path = address_dist_w_eow_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_w_eow_path):
+                        os.rename(address_dist_w_eow_path, new_address_dist_w_eow_path)
+
                     address_dist_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution")
                     new_address_dist_path = address_dist_path+"."+str(current_iteration)
-                    os.rename(zsim_out_path, new_zsim_out_path)
-                    os.rename(subscription_stats_path, new_subscription_stats_path)
-                    os.rename(address_dist_path, new_address_dist_path)
+                    if os.path.isfile(address_dist_path):
+                        os.rename(address_dist_path, new_address_dist_path)
+
+                    address_dist_eow_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.address_distribution.end_of_warmup")
+                    new_address_dist_eow_path = address_dist_eow_path+"."+str(current_iteration)
+                    if os.path.isfile(address_dist_eow_path):
+                        os.rename(address_dist_eow_path, new_address_dist_eow_path)
+
+                    cycle_stats_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.cycle_stats")
+                    new_cycle_stats_path = cycle_stats_path+"."+str(current_iteration)
+                    if os.path.isfile(cycle_stats_path):
+                        os.rename(cycle_stats_path, new_cycle_stats_path)
+
+                    ramulator_stats_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.stats")
+                    new_ramulator_stats_path = ramulator_stats_path+"."+str(current_iteration)
+                    if os.path.isfile(ramulator_stats_path):
+                        os.rename(ramulator_stats_path, new_ramulator_stats_path)
+
+                    subscription_stats_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.subscription_stats")
+                    new_subscription_stats_path = subscription_stats_path+"."+str(current_iteration)
+                    if os.path.isfile(subscription_stats_path):
+                        os.rename(subscription_stats_path, new_subscription_stats_path)
+
+                    subscription_stats_eow_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".ramulator.subscription_stats.end_of_warmup")
+                    new_subscription_stats_eow_path = subscription_stats_eow_path+"."+str(current_iteration)
+                    if os.path.isfile(subscription_stats_eow_path):
+                        os.rename(subscription_stats_eow_path, new_subscription_stats_eow_path)
+
+                    zsim_out_path = os.path.join(stats_folders, processor_type, str(core_number), suite+"_"+benchmark_function+".zsim.out")
+                    new_zsim_out_path = zsim_out_path+"."+str(current_iteration)
+                    if os.path.isfile(zsim_out_path):
+                        os.rename(zsim_out_path, new_zsim_out_path)
 
 end_time = datetime.now()
 print "We are finishing at "+end_time.strftime("%Y-%m-%d %H:%M:%S")
