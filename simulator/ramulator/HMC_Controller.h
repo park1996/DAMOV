@@ -167,16 +167,16 @@ public:
     RowPolicy<HMC>* rowpolicy;  // determines the row-policy (e.g., closed-row vs. open-row)
     RowTable<HMC>* rowtable;  // tracks metadata about rows (e.g., which are open and for how long)
     Refresh<HMC>* refresh;
-    double total_hmc_latency = 0;
-    double total_latency = 0;
-    double total_transfer_latency = 0;
-    double total_in_memory_latency = 0;
-    double total_cycle_waiting_not_ready_request = 0;
-    double total_process_latency = 0;
-    double total_incoming_queuing_latency = 0;
-    double total_outgoing_queuing_latency = 0;
-    double total_bursts = 0;
-    double stalled_cycles = 0;
+    long long total_hmc_latency = 0;
+    long long total_latency = 0;
+    long long total_transfer_latency = 0;
+    long long total_in_memory_latency = 0;
+    long long total_cycle_waiting_not_ready_request = 0;
+    long long total_process_latency = 0;
+    long long total_incoming_queuing_latency = 0;
+    long long total_outgoing_queuing_latency = 0;
+    long long total_bursts = 0;
+    long long stalled_cycles = 0;
     function<void(const Request&)> update_parent_with_latency;
 
     struct Queue {
@@ -197,6 +197,7 @@ public:
             if(i.hops == 0){
               total_pending_task+=q.size();
               i.finish_transfer = clk;
+              assert(i.finish_transfer >= i.arrive_hmc);
               q.push_back(i);
               continue;
             }
@@ -684,6 +685,8 @@ public:
                 [req](Request& wreq){ return req.addr == wreq.addr && req.coreid == wreq.coreid;}) != writeq.q.end()){
             req.depart = clk + 1;
             total_pending_finished_task += pending.size();
+            req.finish_queuing = clk;
+            req.finish_transfer = clk;
             pending.push_back(req);
             req.served_without_hops = 1;
         } else {
@@ -744,21 +747,32 @@ public:
 
             if(pim_mode_enabled){
                 req.depart_hmc = clk;
+                assert(req.arrive_hmc <= clk);
+                assert(req.arrive_hmc >= 0);
+                assert(req.depart_hmc <= clk);
+                assert(req.depart_hmc >= 0);
+                assert(req.arrive <= clk);
+                assert(req.arrive >= 0);
+                assert(req.depart <= clk);
+                assert(req.depart >= 0);
                 total_hmc_latency += (req.depart_hmc - req.arrive_hmc);
                 total_latency += (req.depart - req.arrive);
+                assert(req.finish_transfer >= 0);
+                assert(req.finish_transfer <= clk);
+                assert(req.finish_queuing >= 0);
+                assert(req.finish_queuing <= clk);
                 total_transfer_latency += (req.finish_transfer - req.arrive);
                 total_in_memory_latency += (req.depart - req.finish_transfer);
                 total_process_latency += (req.depart - req.finish_queuing);
-                total_outgoing_queuing_latency += (req.finish_queuing - req.finish_transfer);
-                total_incoming_queuing_latency += (req.depart_hmc - req.depart);
-                // cout << "Req with address " << req.addr << " started at " << req.arrive << " finished transfer at " << req.finish_transfer << " finished queuing at " << req.finish_queuing << " departed HMC at " << req.depart_hmc << endl;
-                // assert(total_hmc_latency >= 0);
-                // assert(total_latency >= 0);
-                // assert(total_transfer_latency >= 0);
-                // assert(total_in_memory_latency >= 0);
-                // assert(total_process_latency >= 0);
-                // assert(total_outgoing_queuing_latency >= 0);
-                // assert(total_incoming_queuing_latency >= 0);
+                total_incoming_queuing_latency += (req.finish_queuing - req.finish_transfer);
+                total_outgoing_queuing_latency += (req.depart_hmc - req.depart);
+                assert(total_hmc_latency >= 0);
+                assert(total_latency >= 0);
+                assert(total_transfer_latency >= 0);
+                assert(total_in_memory_latency >= 0);
+                assert(total_process_latency >= 0);
+                assert(total_outgoing_queuing_latency >= 0);
+                assert(total_incoming_queuing_latency >= 0);
                 if(update_parent_with_latency) {
                     update_parent_with_latency(req);
                 }

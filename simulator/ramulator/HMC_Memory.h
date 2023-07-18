@@ -98,7 +98,7 @@ protected:
   VectorStat record_write_conflicts;
 
   long mem_req_count = 0;
-  long total_hops = 0;
+  long long total_hops = 0;
   long total_memory_accesses = 0;
   int num_cores;
   int max_block_col_bits;
@@ -113,6 +113,7 @@ public:
     long clk = 0;
     bool pim_mode_enabled = false;
     bool network_overhead = false;
+    int per_hop_overhead = 1;
 
     int calculate_hops_travelled(int src_vault, int dst_vault, int length) {
       assert(src_vault >= 0);
@@ -134,7 +135,7 @@ public:
 
       int hops = abs(vault_destination_x - vault_origin_x) + abs(vault_destination_y - vault_origin_y);
       assert(hops <= max_hops);
-      return hops;
+      return hops*per_hop_overhead;
     }
 
     int calculate_broadcast_hops_travelled(int src_vault) {
@@ -902,7 +903,7 @@ public:
       long total_buffer_unsuccessful_insertation = 0;
       long total_subscription_from_buffer = 0;
       long total_resubscriptions = 0;
-      long total_hops = 0;
+      long long total_hops = 0;
 
       // Tasks being communicated via the network
       list<SubscriptionTask> pending;
@@ -1771,7 +1772,7 @@ public:
 
             int new_count_threshold = -1;
             int exammined_thresholds = 0;
-            if(set_sampling_on) {
+            if(set_sampling_on && adaptive_threshold_changes) {
               if(invert_latency_variance_threshold <= 0) {
                 // Use feedback register to do set_sampling
                 int64_t max_feedback = LONG_MIN;
@@ -2315,7 +2316,7 @@ public:
         if(network_overhead) {
           network_width = ceil(sqrt(ctrls.size()));
           network_height = ceil(sqrt(ctrls.size()));
-          max_hops = (network_width+network_height)*(DATA_LENGTH+2);
+          max_hops = (network_width+network_height)*(DATA_LENGTH+2)*per_hop_overhead;
           central_vault = (network_width - 1) / 2 + ((network_height - 1) / 2 * network_width);
           cout << "We are simulating the network latency of a " << network_width << "x" << network_height << " network" << endl;
         }
@@ -2483,6 +2484,16 @@ public:
             }
           }
         }
+
+        if (configs.contains("per_hop_overhead")) {
+          per_hop_overhead = stoi(configs["per_hop_overhead"]);
+          cout << "Per hop overhead " << per_hop_overhead << " cycles" << endl;
+          network_width = ceil(sqrt(ctrls.size()));
+          network_height = ceil(sqrt(ctrls.size()));
+          max_hops = (network_width+network_height)*(DATA_LENGTH+2)*per_hop_overhead;
+          network_cycle_distribution.assign(max_hops, 0);
+        }
+
 
         if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
           prefetcher_set.initialize_sets();
@@ -3208,7 +3219,7 @@ public:
 
             if(req.coreid >= 0 && req.coreid < 256) {
               network_cycle_distribution[hops]++;
-              int simplified_hops = calculate_hops_travelled(req.coreid, req.addr_vec[int(HMC::Level::Vault)]);
+              int simplified_hops = calculate_hops_travelled(req.coreid, req.addr_vec[int(HMC::Level::Vault)])/per_hop_overhead;
               hops_distribution[simplified_hops]++;
               assert(address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]] >= 0);
               address_distribution[req.coreid][req.addr_vec[int(HMC::Level::Vault)]]++;
@@ -3372,21 +3383,21 @@ public:
         sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
       }
       sub_stats_ofs << "AccessPktHopsTravelled: " << total_hops << "\n";
-      long total_latency = 0;
-      long total_hmc_latency = 0;
-      long total_waiting_ready = 0;
-      long total_readq_pending = 0;
-      long total_writeq_pending = 0;
-      long total_otherq_pending = 0;
-      long total_overflow_pending = 0;
-      long total_transfer_latency = 0;
-      long total_in_memory_latency = 0;
-      long total_process_latency = 0;
-      long total_incoming_queuing_latency = 0;
-      long total_outgoing_queuing_latency = 0;
-      long total_bursts = 0;
-      long stalled_cycles = 0;
-      long total_pending_queue_pending = 0;
+      long long total_latency = 0;
+      long long total_hmc_latency = 0;
+      long long total_waiting_ready = 0;
+      long long total_readq_pending = 0;
+      long long total_writeq_pending = 0;
+      long long total_otherq_pending = 0;
+      long long total_overflow_pending = 0;
+      long long total_transfer_latency = 0;
+      long long total_in_memory_latency = 0;
+      long long total_process_latency = 0;
+      long long total_incoming_queuing_latency = 0;
+      long long total_outgoing_queuing_latency = 0;
+      long long total_bursts = 0;
+      long long stalled_cycles = 0;
+      long long total_pending_queue_pending = 0;
       sub_stats_ofs << "-----Controller Stats-----" << "\n";
       for(int c = 0; c < ctrls.size(); c++) {
         sub_stats_ofs << "Controller" << c << "MaxReadQQSize: " << ctrls[c] -> readq.max_q_size << "\n";
@@ -3427,6 +3438,8 @@ public:
         total_bursts += ctrls[c]->total_bursts;
         sub_stats_ofs << "Controller" << c << "StalledCycles: " << ctrls[c]->stalled_cycles << "\n";
         stalled_cycles += ctrls[c]->stalled_cycles;
+        assert(total_hmc_latency >= 0);
+        assert(total_latency >= 0);
       }
       sub_stats_ofs << "TotalWaitingReady: " << total_waiting_ready << "\n";
       sub_stats_ofs << "TotalRequestLatency: " << total_latency << "\n";
