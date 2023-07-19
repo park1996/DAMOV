@@ -353,7 +353,8 @@ selected_benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNE
     "darknet" : ["yolo_gemm_nn"],
     "phoenix" : ["Linearregression_main"],
     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d"], 
-    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Radix_slave_sort"],}
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Radix_slave_sort"],
+    "stream" : ["Triad_Triad"]}
 
 selected_normalized_cycle_csv_output_dir = os.path.join(output_dir,"selected_bm_normalized_cycle.csv")
 selected_avg_access_hops_csv_output_dir = os.path.join(output_dir,"selected_bm_avg_access_hops.csv")
