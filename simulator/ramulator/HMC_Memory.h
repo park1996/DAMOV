@@ -853,6 +853,7 @@ public:
       unordered_map<int, int> global_requests_completed_for_diff_thresholds;
       unordered_map<int, int64_t> global_feedbacks_for_diff_thresholds;
       uint64_t threshold_change_epoch = 100000;
+      vector<int> total_unsub_epochs;
       vector<uint64_t> prefetch_count_thresholds;
       int64_t next_prefetch_count_threshold = -1;
       uint64_t prefetch_maximum_count_threshold = 0;
@@ -1166,6 +1167,7 @@ public:
         requests_completed_for_current_epoch.assign(controllers, 0);
         previous_latencies.assign(controllers, 0.0);
         prefetch_count_thresholds.assign(controllers, prefetch_count_threshold);
+        total_unsub_epochs.assign(controllers, 0);
         last_threshold_change.assign(controllers, -1);
         maximum_latency_for_current_epoch.assign(controllers, 0);
         latencies_for_diff_thresholds.assign(controllers, unordered_map<int, long>());
@@ -1900,6 +1902,23 @@ public:
                 prefetch_maximum_count_threshold = new_count_threshold;
               }
 
+              // // Go back to subscribe when we are non subscribe for 10 straight epochs to detect when subscription is helpful
+              // // It causes about 5-10% performance cost depends on the bm 
+              // if(new_count_threshold >= count_table.get_count_upper_limit()+1) { // If we're using no subscription for this epoch...
+              //   // We increase the counter
+              //   total_unsub_epochs[c]++;
+              //   // If we have more than 10 epoch with no subscription...
+              //   if(total_unsub_epochs[c] > 10) {
+              //     // We force this epoch to become subscription
+              //     last_threshold_change[c] = -1;
+              //     new_count_threshold = count_table.get_count_lower_limit();
+              //     total_unsub_epochs[c] = 0;
+              //   }
+              // } else {
+              //   // otherwise we reset the counter to 0
+              //   total_unsub_epochs[c] = 0;
+              // }
+
               mem_ptr -> adaptive_thresholds << new_count_threshold << ",";
               mem_ptr -> adaptive_thresholds_record << new_count_threshold << ",";
               if(!use_global_adaptive) {
@@ -1912,6 +1931,7 @@ public:
                 }
               } else if(c == mem_ptr -> central_vault) {
                 next_prefetch_count_threshold = (int64_t)new_count_threshold;
+                
               }
               // cout << "The count threshold for vault " << c << " is " << prefetch_count_thresholds[c] << endl;
             }
