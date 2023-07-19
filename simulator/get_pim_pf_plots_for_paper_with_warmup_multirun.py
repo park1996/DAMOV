@@ -16,7 +16,7 @@ count_thresholds = [0]
 hops_thresholds_str = [""]
 count_thresholds_str = [""]
 debug_tag = "debugoff"
-iterations = 1
+iterations = 5
 core_number = 32
 
 def check_stat_file_exist(stat_file_location):
