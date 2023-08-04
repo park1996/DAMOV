@@ -322,8 +322,10 @@ public:
         size_t receiving = 0;
         LRUUnit* lru_unit = nullptr;
         LFUUnit* lfu_unit = nullptr;
+        Memory<HMC, Controller>* mem_ptr = nullptr;
         SubscriptionBuffer* subscription_buffer = nullptr;
         int count_threshold = 0;
+        long total_in_table = 0;
         struct SubscriptionTableEntry {
           int vault;
           enum SubscriptionStatus {
@@ -334,6 +336,7 @@ public:
             Invalid,
           } status = SubscriptionStatus::PendingSubscription;
           bool dirty = false;
+          long finished_subscription = 0;
           SubscriptionTableEntry(){}
           SubscriptionTableEntry(int vault):vault(vault){}
           SubscriptionTableEntry(int vault, SubscriptionTableEntry::SubscriptionStatus status):vault(vault),status(status){}
@@ -345,7 +348,7 @@ public:
         public:
         unordered_map<long, int> unused_subscriptions;
         SubscriptionTable(){}
-        SubscriptionTable(size_t size, size_t ways, size_t receiving_buffer_size):subscription_table_size(size),subscription_table_ways(ways),receiving_buffer_size(receiving_buffer_size) {initialize();} // Only set from table size
+        SubscriptionTable(size_t size, size_t ways, size_t receiving_buffer_size, Memory<HMC, Controller>* mem_ptr):subscription_table_size(size),subscription_table_ways(ways),receiving_buffer_size(receiving_buffer_size), mem_ptr(mem_ptr){initialize();} // Only set from table size
         void propogate_count_threshold(int threshold) {
           count_threshold = threshold;
         }
@@ -430,6 +433,7 @@ public:
           }
           assert(is_pending_subscription(addr) || is_pending_removal(addr));
           if(has(addr)) {
+            address_translation_table.at(addr).finished_subscription = mem_ptr -> clk;
             address_translation_table.at(addr).status = SubscriptionTableEntry::SubscriptionStatus::Subscribed;
           }
         }
@@ -501,6 +505,9 @@ public:
         void remove_table_entry(long addr) {
           if(has(addr)) {
             erase_lfu_lru(addr);
+            if(address_translation_table[addr].finished_subscription > 0) {
+              total_in_table += (mem_ptr -> clk - address_translation_table[addr].finished_subscription);
+            }
             // Actually remove the address from the table
             address_translation_table.erase(addr);
             if(unused_subscriptions.count(addr) > 0) {
@@ -582,6 +589,15 @@ public:
           }
         }
         size_t count(long addr) const{return address_translation_table.count(addr);}
+        void finish() {
+          for(auto i:address_translation_table) {
+            if(i.second.finished_subscription > 0) {
+              total_in_table += (mem_ptr -> clk - i.second.finished_subscription);
+              assert(total_in_table > 0);
+            }
+          }
+        }
+        long get_total_in_table()const {return total_in_table;}
       };
       vector<SubscriptionTable> subscription_tables;
 
@@ -905,6 +921,10 @@ public:
       long total_subscription_from_buffer = 0;
       long total_resubscriptions = 0;
       long long total_hops = 0;
+      long total_subscribed_accesses = 0;
+      long total_subscribed_local_accesses = 0;
+      double total_in_table = 0;
+      double avg_in_table_per_subscription = 0;
 
       // Tasks being communicated via the network
       list<SubscriptionTask> pending;
@@ -1128,7 +1148,7 @@ public:
         return subscription_tables[0].get_set(addr);
       }
       void initialize_sets(){
-        subscription_tables.assign(controllers, SubscriptionTable(subscription_table_size, subscription_table_ways, SIZE_MAX));
+        subscription_tables.assign(controllers, SubscriptionTable(subscription_table_size, subscription_table_ways, SIZE_MAX, mem_ptr));
         for(int i = 0; i < controllers; i++) {
           subscription_tables[i].set_controller(i);
         }
@@ -1982,6 +2002,10 @@ public:
           }
           subscription_tables[original_vault_id].touch(req.coreid == original_vault_id, addr);
           subscription_tables[val_vault_id].touch(req.coreid == original_vault_id, addr);
+          total_subscribed_accesses++;
+          if(req.coreid == val_vault_id) {
+            total_subscribed_local_accesses++;
+          }
           print_debug_info("Redirecting "+to_string(addr)+" to vault "+to_string(subscription_tables[original_vault_id][addr])+" because it is subscribed");
           // Also, we set the address vector's vault to the subscribed vault so it can be sent to the correct vault for processing.
           req.addr_vec[int(HMC::Level::Vault)] = val_vault_id;
@@ -2253,6 +2277,8 @@ public:
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
         cout << "Total memory accesses: " << total_memory_accesses << endl;
+        cout << "Total subscribed accesses: " << total_subscribed_accesses << endl;
+        cout << "Total subscribed local accesses: " << total_subscribed_local_accesses << endl;
         cout << "Total submitted subscriptions: " << total_submitted_subscriptions << endl;
         cout << "Total Successful Subscription: " << total_successful_subscriptions << endl;
         cout << "Total Unsuccessful Subscription: " << total_unsuccessful_subscriptions << endl;
@@ -2267,9 +2293,19 @@ public:
         cout << "Total threshold increases: " << total_threshold_increases << endl;
         cout << "Total threshold decreases: " << total_threshold_decreases << endl;
         cout << "Maximum count threshold: " << prefetch_maximum_count_threshold << endl;
+        for(int c = 0; c < controllers; c++) {
+          subscription_tables[c].finish();
+          total_in_table += (double)subscription_tables[c].get_total_in_table();
+        }
+        total_in_table = total_in_table / 2;
+        avg_in_table_per_subscription = total_in_table / (double)total_successful_subscriptions;
+        cout << "Total subscription lifespan in table: " << total_in_table << endl;
+        cout << "Average subscription lifespan: " << avg_in_table_per_subscription << endl;
         count_table.print_stats();
       }
       long get_total_memory_accesses()const {return total_memory_accesses;}
+      long get_total_subscribed_accesses()const {return total_subscribed_accesses;}
+      long get_total_subscribed_local_accesses()const {return total_subscribed_local_accesses;}
       long get_total_submitted_subscriptions()const {return total_submitted_subscriptions;}
       long get_total_successful_subscriptions()const {return total_successful_subscriptions;}
       long get_total_unsuccessful_subscriptions()const {return total_unsuccessful_subscriptions;}
@@ -2289,6 +2325,8 @@ public:
       long get_total_threshold_increases()const{return total_threshold_increases;}
       long get_total_threshold_decreases()const{return total_threshold_decreases;}
       long get_prefetch_maximum_count_threshold()const{return prefetch_maximum_count_threshold;}
+      double get_total_in_table()const{return total_in_table;}
+      double get_avg_in_table_per_subscription()const{return avg_in_table_per_subscription;}
     };
     
     SubscriptionPrefetcherSet prefetcher_set;
@@ -3378,6 +3416,8 @@ public:
       if (subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
         sub_stats_ofs << "-----Prefetcher Stats-----" << "\n";
         sub_stats_ofs << "MemAccesses: " << prefetcher_set.get_total_memory_accesses() << "\n";
+        sub_stats_ofs << "SubAccesses: " << prefetcher_set.get_total_subscribed_accesses() << "\n";
+        sub_stats_ofs << "SubLocAccesses: " << prefetcher_set.get_total_subscribed_local_accesses() << "\n";
         sub_stats_ofs << "SubmittedSubscriptions: " << prefetcher_set.get_total_submitted_subscriptions() << "\n";
         sub_stats_ofs << "SuccessfulSubscriptions: " << prefetcher_set.get_total_successful_subscriptions() << "\n";
         sub_stats_ofs << "UnsuccessfulSubscriptions: " << prefetcher_set.get_total_unsuccessful_subscriptions() << "\n";
@@ -3398,6 +3438,8 @@ public:
         sub_stats_ofs << "TotalThresholdInc: " << prefetcher_set.get_total_threshold_increases() << "\n";
         sub_stats_ofs << "TotalThresholdDec: " << prefetcher_set.get_total_threshold_decreases() << "\n";
         sub_stats_ofs << "MaxCountThreshold: " << prefetcher_set.get_prefetch_maximum_count_threshold() << "\n";
+        sub_stats_ofs << "TotalInTable: "<< prefetcher_set.get_total_in_table() << "\n";
+        sub_stats_ofs << "AvgInTable: " << prefetcher_set.get_avg_in_table_per_subscription() << "\n";
         sub_stats_ofs << "-----End Prefetcher Stats-----" << "\n";
       } else {
         sub_stats_ofs << "MemAccesses: " << total_memory_accesses << "\n";
@@ -3581,8 +3623,8 @@ public:
       cycle_stats_ofs << "WarmupCycles: " << (clk_at_end_of_warmup <= 0 ? clk : clk_at_end_of_warmup)  << "\n";
       cycle_stats_ofs.close();
       string sub_stats_to_open = application_name+".ramulator.subscription_stats";
-      write_sub_stats_file(sub_stats_to_open);
       prefetcher_set.print_stats();
+      write_sub_stats_file(sub_stats_to_open);
       cout << "Total number of hops travelled: " << total_hops << endl;
 
       string address_access_count_to_open = application_name+".ramulator.address_access_count.csv";
