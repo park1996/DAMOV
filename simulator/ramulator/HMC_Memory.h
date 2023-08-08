@@ -1849,10 +1849,10 @@ public:
             }
 
             double magnitude = 0.0;
-            if(!set_sampling_on || (new_count_threshold == -1 && magnitude_adaptive)) {
+            if(!set_sampling_on || (new_count_threshold == -1 && magnitude_adaptive) || invert_latency_variance_threshold <= 0) {
               new_count_threshold = prefetch_count_thresholds[c];
               // cout << "Before increase, the threshold of vault " << c << " is " << new_count_threshold << endl;
-              if((use_global_adaptive ? global_previous_latencies : previous_latencies[c]) == 0 || bimodel_adaptive_on) {
+              if((use_global_adaptive ? global_previous_latencies : previous_latencies[c]) == 0 || bimodel_adaptive_on || invert_latency_variance_threshold <= 0) {
                 // if(feedbacks[c] > positive_feedback_threshold) {
                 //   // cout << "Increase the count threshold of vault " << c << " by one due to hops" << endl;
                 //   new_count_threshold++;
