@@ -93,16 +93,16 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
 #     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # Following are all the benchmarks that currently runs
-# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "OOPPAD_OOPPAD"],
-#     "darknet" : ["yolo_gemm_nn"],
-#     "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
-#     "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
-#     "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
-#     "phoenix" : ["Linearregression_main", "Stringmatch_main"],
-#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
-#     "rodinia" : ["BFS_BFS", "NW_UserAdded"],
-#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
-#     "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
+benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL", "HSTI_HSTI", "OOPPAD_OOPPAD"],
+    "darknet" : ["yolo_gemm_nn"],
+    "hashjoin" : ["NPO_probehashtable", "PRH_histogramjoin"],
+    "hpcg" : ["HPCG_ComputePrologation", "HPCG_ComputeRestriction", "HPCG_ComputeSPMV", "HPCG_ComputeSYMGS"],
+    "ligra" : ["BC_edgeMapSparseUSAUserAdded", "BFSCC_edgeMapSparseUSAUserAdded", "BFS_edgeMapSparseUSAUserAdded", "PageRank_edgeMapDenseUSA",  "Triangle_edgeMapDenseRmat"],
+    "phoenix" : ["Linearregression_main", "Stringmatch_main"],
+    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gramschmidt", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d", "stencil_fdtd-apml"], 
+    "rodinia" : ["BFS_BFS", "NW_UserAdded"],
+    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_jacobcalc", "Oceanncp_laplaccalc", "Oceancp_slave2", "Radix_slave_sort"],
+    "stream" : ["Add_Add", "Copy_Copy", "Scale_Scale", "Triad_Triad"]}
 # The following benchmarks requires to be run serialized (or run multiple times?)
 # serialized_benchmark_suites_and_benchmarks_functions = {
 #     "hpcg" : ["HPCG_ComputeSYMGS"],
@@ -131,12 +131,12 @@ def run_benchmark(processor_type, benchmark_suite, core_number, function, postfi
 #     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Oceanncp_laplaccalc", "Radix_slave_sort"], 
 #     "stream" : ["Triad_Triad"]}
 # Following are reserved for test runs of selected benchmarks
-benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
-    "darknet" : ["yolo_gemm_nn"],
-    "phoenix" : ["Linearregression_main"],
-    "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d"], 
-    "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Radix_slave_sort"],
-    "stream" : ["Triad_Triad"]}
+# benchmark_suites_and_benchmarks_functions = {"chai" : ["BS_BEZIER_KERNEL"],
+#     "darknet" : ["yolo_gemm_nn"],
+#     "phoenix" : ["Linearregression_main"],
+#     "polybench" : ["linear-algebra_3mm", "linear-algebra_doitgen", "linear-algebra_gemm", "linear-algebra_gemver", "linear-algebra_symm", "stencil_convolution-2d"], 
+#     "splash-2" : ["FFT_Reverse", "FFT_Transpose", "Radix_slave_sort"],
+#     "stream" : ["Triad_Triad"]}
 
 clean_darknet_chai_inputs()
 
@@ -180,6 +180,7 @@ for prefetcher_type in prefetcher_types:
 
 for current_iteration in range(iterations):
     total_experiment_count = 0
+    failed_benchmarks = []
     for suite in benchmark_suites_and_benchmarks_functions.keys():
         total_experiment_count += len(benchmark_suites_and_benchmarks_functions[suite])
     total_experiment_count *= len(processor_types)
