@@ -17,7 +17,7 @@ hops_thresholds_str = [""]
 count_thresholds_str = [""]
 debug_tag = "debugoff"
 iterations = 5
-core_number = 32
+core_number = 128
 
 def check_stat_file_exist(stat_file_location):
     for i in range(iterations):
@@ -98,6 +98,25 @@ def extract_subscription_stats(stat_file_location, stat_name):
             for line in stat:
                 if(line.find(stat_name)!= -1):
                     value_at_end_of_warmup = int(line.split()[1])
+        if value == -1 or value_at_end_of_warmup == -1:
+            return -1.0
+        else:
+            total_value+=(value - value_at_end_of_warmup)
+    return float(total_value)/float(iterations)
+
+def extract_subscription_stats_float(stat_file_location, stat_name):
+    total_value = 0.0
+    for i in range(iterations):
+        value = -1
+        value_at_end_of_warmup = -1
+        with open(stat_file_location+"."+str(i), mode='r') as stat:
+            for line in stat:
+                if(line.find(stat_name)!= -1):
+                    value = float(line.split()[1])
+        with open(stat_file_location+".end_of_warmup"+"."+str(i), mode='r') as stat:
+            for line in stat:
+                if(line.find(stat_name)!= -1):
+                    value_at_end_of_warmup = float(line.split()[1])
         if value == -1 or value_at_end_of_warmup == -1:
             return -1.0
         else:
@@ -290,6 +309,8 @@ for suite in benchmark_suites_and_benchmarks_functions.keys():
             baseline_xfer_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalTransferLatency")
             baseline_inc_qing_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalIncomingQueuingLatency")
             baseline_out_qing_latency = extract_subscription_stats(baseline_sub_stat_file_location, "TotalOutgoingQueuingLatency")
+        else:
+            print baseline_sub_stat_file_location+" does not exist"
         baseline_avg_hops[benchmark_key] = 0 if baseline_access_hops == -1 or baseline_mem_access == -1 or baseline_mem_access == 0 else float(baseline_access_hops)/float(baseline_mem_access)
         baseline_avg_hmc_latency[benchmark_key] = 0 if baseline_hmc_latency == -1 or baseline_mem_access == -1 or baseline_mem_access == 0 else float(baseline_hmc_latency)/float(baseline_mem_access)
         baseline_avg_xfer_latency[benchmark_key] = 0 if baseline_xfer_latency == -1 or baseline_mem_access == -1 or baseline_mem_access == 0 else float(baseline_xfer_latency)/float(baseline_mem_access)
@@ -327,10 +348,12 @@ write_stats_output_files(output_dir, "baseline_avg_qing_latency", "Baseline Aver
 write_stats_output_files(output_dir, "baseline_xfer_percentage", "Baseline Transfer Latency Propotionate to Total Latency by Workload", "Workload", "Percentage", baseline_xfer_percentage)
 write_stats_output_files(output_dir, "baseline_qing_percentage", "Baseline Queuing Latency Propotionate to Total Latency by Workload", "Workload", "Percentage", baseline_qing_percentage)
 
-plotting_prefetcher_policies = ["1h0c"]
+plotting_prefetcher_policies = ["1h0c", "adaptive"]
 for prefetcher_type in prefetcher_types:
     for policy in plotting_prefetcher_policies:
         normalized_cycles = {}
+        avg_sub_access = {}
+        avg_loc_sub_access = {}
         for suite in benchmark_suites_and_benchmarks_functions.keys():
             for benchmark_function in benchmark_suites_and_benchmarks_functions[suite]:
                 processor_type = processor_type_prefix+prefetcher_type
@@ -345,7 +368,19 @@ for prefetcher_type in prefetcher_types:
                 if check_stat_file_exist(stat_file_location):
                     cycle = extract_cycle(stat_file_location)
                 normalized_cycles[benchmark_key] = 0 if baseline_cycle == -1 or cycle == -1 or cycle == 0 else float(baseline_cycle)/float(cycle)
+                sub_stat_file_location = os.path.join(stats_folders, processor_type, policy+"_"+debug_tag, str(core_number), full_benchmark_name+".ramulator.subscription_stats")
+                successful_subscription = -1
+                subscription_accesses = -1
+                local_subscription_accesses = -1
+                if check_stat_file_exist(sub_stat_file_location):
+                    successful_subscription = extract_subscription_stats(sub_stat_file_location, "SuccessfulSubscriptions")
+                    subscription_accesses = extract_subscription_stats(sub_stat_file_location, "SubAccesses")
+                    local_subscription_accesses = extract_subscription_stats(sub_stat_file_location, "SubLocAccesses")
+                avg_sub_access[benchmark_key] = 0 if successful_subscription == 0 or successful_subscription == -1 or subscription_accesses == -1 else float(subscription_accesses)/float(successful_subscription)
+                avg_loc_sub_access[benchmark_key] = 0 if successful_subscription == 0 or successful_subscription == -1 or subscription_accesses == -1 else float(local_subscription_accesses)/float(successful_subscription)
         write_stats_output_files(output_dir, "normalized_cycles_"+prefetcher_type+"_"+policy, "Normalized Cycle by Workload", "Workload", "Normalized Cycle", normalized_cycles)
+        write_stats_output_files(output_dir, "avg_sub_access_"+prefetcher_type+"_"+policy, "Average Subscription Accesses by Workload", "Workload", "Access", avg_sub_access)
+        write_stats_output_files(output_dir, "avg_loc_sub_access_"+prefetcher_type+"_"+policy, "Average Local Subscription Accesses by Workload", "Workload", "Access", avg_loc_sub_access)
 plt.subplots_adjust(bottom=0.1)
 
 # The following are benchmarks that impacted by our model
