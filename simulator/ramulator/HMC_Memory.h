@@ -2274,6 +2274,17 @@ public:
           }
         }
       }
+      void finish() {
+        for(int c = 0; c < controllers; c++) {
+          subscription_tables[c].finish();
+          total_in_table += (double)subscription_tables[c].get_total_in_table();
+        }
+        total_in_table = total_in_table / 2;
+        avg_in_table_per_subscription = 0;
+        if(avg_in_table_per_subscription > 0) {
+          avg_in_table_per_subscription = total_in_table / (double)avg_in_table_per_subscription;
+        }
+      }
       void print_stats(){
         cout << "-----Prefetcher Stats-----" << endl;
         cout << "Total memory accesses: " << total_memory_accesses << endl;
@@ -2293,12 +2304,6 @@ public:
         cout << "Total threshold increases: " << total_threshold_increases << endl;
         cout << "Total threshold decreases: " << total_threshold_decreases << endl;
         cout << "Maximum count threshold: " << prefetch_maximum_count_threshold << endl;
-        for(int c = 0; c < controllers; c++) {
-          subscription_tables[c].finish();
-          total_in_table += (double)subscription_tables[c].get_total_in_table();
-        }
-        total_in_table = total_in_table / 2;
-        avg_in_table_per_subscription = total_in_table / (double)total_successful_subscriptions;
         cout << "Total subscription lifespan in table: " << total_in_table << endl;
         cout << "Average subscription lifespan: " << avg_in_table_per_subscription << endl;
         count_table.print_stats();
@@ -3622,8 +3627,11 @@ public:
       cycle_stats_ofs << "RamulatorCycleAtFinish: " << clk << "\n";
       cycle_stats_ofs << "WarmupCycles: " << (clk_at_end_of_warmup <= 0 ? clk : clk_at_end_of_warmup)  << "\n";
       cycle_stats_ofs.close();
-      string sub_stats_to_open = application_name+".ramulator.subscription_stats";
+      if(subscription_prefetcher_type != SubscriptionPrefetcherType::None) {
+        prefetcher_set.finish();
+      }
       prefetcher_set.print_stats();
+      string sub_stats_to_open = application_name+".ramulator.subscription_stats";
       write_sub_stats_file(sub_stats_to_open);
       cout << "Total number of hops travelled: " << total_hops << endl;
 
