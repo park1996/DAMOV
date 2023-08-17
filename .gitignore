@@ -44,3 +44,4 @@ simulator/plots_for_paper_*/
 simulator/plots_for_paper_*/*
 simulator/archived_*/
 simulator/archived_*/*
+simulator/*trace*.txt
