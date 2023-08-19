@@ -31,7 +31,23 @@
 #include "zsim.h"
 
 Cache::Cache(uint32_t _numLines, CC* _cc, CacheArray* _array, ReplPolicy* _rp, uint32_t _accLat, uint32_t _invLat, bool _bypass, const g_string& _name)
-    : cc(_cc), array(_array), rp(_rp), numLines(_numLines), accLat(_accLat), invLat(_invLat), name(_name), bypass(_bypass) {}
+    : cc(_cc), array(_array), rp(_rp), numLines(_numLines), accLat(_accLat), invLat(_invLat), name(_name), bypass(_bypass) {
+    init_trace();
+}
+
+void Cache::init_trace(){
+    // Only dump trace if the cache is not set as bypass
+    if(!bypass && cache_trace) {
+        std::string pathStr = zinfo->outputDir;
+        pathStr += "/";
+
+        std::string application = zinfo->application;
+        std::string trace_file_location = pathStr+application+"."+name.c_str()+".cache_access_trace.csv";
+        printf("Dumping cache access trace for %s at %s\n", name.c_str(), trace_file_location.c_str());
+        cache_trace_ofs.open(trace_file_location.c_str(), ofstream::out);
+        cache_trace_ofs << "Cycle,Address,Type\n";
+    }
+}
 
 const char* Cache::getName() {
     return name.c_str();
@@ -58,8 +74,21 @@ void Cache::initCacheStats(AggregateStat* cacheStat) {
     rp->initStats(cacheStat);
 }
 
+void Cache::record_access(const MemReq& req) {
+    if(!bypass && cache_trace) {
+        cache_trace_ofs << req.cycle << "," << req.lineAddr << "," << AccessTypeName(req.type) << "\n";
+    }
+}
+
+Cache::~Cache(){
+    if(!bypass && cache_trace) {
+        cache_trace_ofs.close();
+    }
+}
+
 uint64_t Cache::access(MemReq& req) {
     uint64_t respCycle = req.cycle;
+    record_access(req);
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
     if (likely(!skipAccess)) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);

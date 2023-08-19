@@ -33,6 +33,10 @@
 #include "memory_hierarchy.h"
 #include "repl_policies.h"
 #include "stats.h"
+#include <unordered_map>
+#include <map>
+#include <string>
+#include <fstream>
 
 class Network;
 
@@ -55,6 +59,9 @@ class Cache : public BaseCache {
         uint32_t invLat; //latency of an invalidation
 
         g_string name;
+        std::ofstream cache_trace_ofs;
+        // Currently trace dump is controlled by this bool value. Changing requires recompile
+        bool cache_trace = false;
 
     public:
         Cache(uint32_t _numLines, CC* _cc, CacheArray* _array, ReplPolicy* _rp, uint32_t _accLat, uint32_t _invLat, bool _bypass, const g_string& _name);
@@ -64,6 +71,8 @@ class Cache : public BaseCache {
         void setChildren(const g_vector<BaseCache*>& children, Network* network);
         void initStats(AggregateStat* parentStat);
 
+        void init_trace();
+        void record_access(const MemReq& req);
         virtual uint64_t access(MemReq& req);
 
         //NOTE: reqWriteback is pulled up to true, but not pulled down to false.
@@ -71,6 +80,7 @@ class Cache : public BaseCache {
             startInvalidate();
             return finishInvalidate(req);
         }
+        virtual ~Cache();
 
     protected:
         void initCacheStats(AggregateStat* cacheStat);
