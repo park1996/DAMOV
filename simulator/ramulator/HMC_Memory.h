@@ -163,7 +163,7 @@ public:
       string to_open = application_name + ".memory_addresses.csv";
       std::cout << "Recording memory trace at " << to_open << "\n";
       memory_addresses.open(to_open.c_str(), std::ofstream::out);
-      memory_addresses << "CLK,ADDR,CoreID,Hops,NoPFHops,W|R,Vault,BankGroup,Bank,Row,Column \n";
+      memory_addresses << "CLK,RawADDR,ADDR,CoreID,Hops,NoPFHops,W|R,Vault,BankGroup,Bank,Row,Column \n";
     }
 
     void set_adaptive_threshold_recorder () {
@@ -3303,7 +3303,7 @@ public:
 
             if(get_memory_addresses){
               if (profile_this_epoch){
-                memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
+                memory_addresses << clk << "," << req._addr << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
                 if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
                 else if (req.type == Request::Type::READ)   memory_addresses << "R,";
                 else                                        memory_addresses << "NA,";
@@ -3326,7 +3326,7 @@ public:
               }
             }
 
-            memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
+            memory_addresses << clk << "," << req._addr << "," << req.addr << "," << req.coreid << "," << actual_hops << "," << no_prefetcher_hops << ",";
             if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
             else if (req.type == Request::Type::READ)   memory_addresses << "R,";
             else                                        memory_addresses << "NA,";
@@ -3375,7 +3375,7 @@ public:
           cout << "Get memory address \n";
           if (profile_this_epoch){
 
-          memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
+          memory_addresses << clk << "," << req._addr << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
           if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
           else if (req.type == Request::Type::READ)   memory_addresses << "R,";
           else                                        memory_addresses << "NA,";
@@ -3398,7 +3398,7 @@ public:
           }
         }
 
-        memory_addresses << clk << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
+        memory_addresses << clk << "," << req._addr << "," << req.addr << "," << req.coreid << "," << 0 << "," << 0 << ",";
         if (req.type == Request::Type::WRITE)       memory_addresses << "W,";
         else if (req.type == Request::Type::READ)   memory_addresses << "R,";
         else                                        memory_addresses << "NA,";
