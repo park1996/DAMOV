@@ -890,6 +890,8 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->statsBackends = new g_vector<StatsBackend*>();
 
     Config config(configFile);
+    string application  = config.get<const char*>("sim.stats");
+    zinfo->application = gm_strdup(application.c_str());
 
     //Debugging
     //NOTE: This should be as early as possible, so that we can attach to the debugger before initialization.
@@ -1048,10 +1050,10 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     bool strictConfig = config.get<bool>("sim.strictConfig", true); //if true, panic on unused variables
     string pathStr = zinfo->outputDir;
     pathStr += "/";
-    string application  = config.get<const char*>("sim.stats");
+    // string application  = config.get<const char*>("sim.stats");
     application_path = pathStr + application;
 
-   // zinfo->application = application;
+//    zinfo->application = application;
     config.writeAndClose((pathStr + application + ".out.cfg").c_str(), strictConfig);
 
     zinfo->contentionSim->postInit();

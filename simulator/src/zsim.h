@@ -191,7 +191,8 @@ struct GlobSimInfo {
 
     bool ramulator_memory = false;
     Ramulator  *ramulator;
-    std::string application;
+    // std::string application;
+    const char* application;
     std::string to_record_stats;
 
     uint64_t totalInstrs=0;
